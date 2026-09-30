@@ -110,18 +110,18 @@ const DEPLOY_GAS_MULTIPLIER = parseFloat(process.env.DEPLOY_GAS_MULTIPLIER || '1
 //   3. Renounces ownership on every other Ownable contract on that chain
 //      (CawActions_<L>, CawProfileURI on L1).
 //
-// After phase 7, the only residual owner authority on the system is:
-//   - PathwayExpander.owner (= deployer EOA), which can ONLY call addPeer
-//     for not-yet-set eids on the OApps it owns. Cannot reconfigure
-//     existing peers, cannot rotate delegate, cannot transfer the OApps'
-//     ownership away.
-//   - LZ EndpointV2.delegates(oapp) (= deployer EOA at time of writing),
-//     which controls DVN/library config on each pathway. Phase 7 does
-//     NOT touch the delegate by design — DVN config flexibility is the
-//     last operational lever we leave open. To finalize that surface
-//     too, run a separate one-shot or call `setDelegate(0)` on each
-//     OApp via the expander before transferring ownership (which we do
-//     not do today; the additions-only design is for peers, not delegates).
+// After phase 7, the remaining global privileged authority is:
+//   - PathwayExpander.owner (= deployer EOA unless later transferred or
+//     renounced). Its additions-only surface includes addPeer/addPeers,
+//     addKycVerifier, configureNewPathway, and addDvnToPathway. Existing
+//     peers and already-configured pathways cannot be arbitrarily rewritten,
+//     and PathwayExpander exposes no path to transfer its OApps back out.
+//   - LZ EndpointV2.delegates(oapp) is wired to the corresponding
+//     PathwayExpander. This leaves new-pathway DVN/ULN configuration open
+//     through the constrained PathwayExpander surface while its ownership
+//     remains live.
+//   - PathwayExpander ownership can itself be renounced, which permanently
+//     closes these additions-only paths while preserving existing pathways.
 
 // The deployer wallet address (for verification)
 const EXPECTED_DEPLOYER = '0xF71338f3eAa483aA66125598B09BA1988e694a95';
