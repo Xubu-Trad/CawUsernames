@@ -73,6 +73,19 @@ contract PathwayExpander is Ownable {
   // ULN config type id — LZ V2 standard (CONFIG_TYPE_EXECUTOR=1, CONFIG_TYPE_ULN=2).
   uint32 public constant CONFIG_TYPE_ULN = 2;
 
+  /// @notice Maximum lifetime of the privileged bootstrap authority.
+  ///         The deadline is fixed at deployment and cannot be extended.
+  uint64 public constant AUTHORITY_WINDOW = 120 days;
+
+  /// @notice Timestamp after which every privileged expansion path is disabled.
+  uint64 public immutable authorityExpiry;
+
+  modifier onlyActiveOwner() {
+    _checkOwner();
+    require(block.timestamp < authorityExpiry, "PathwayExpander: authority expired");
+    _;
+  }
+
   /// @dev Tracks which (oapp, lib, eid) DVN configs have already been set via
   ///      configureNewPathway. The check uses a nested mapping rather than
   ///      endpoint.getConfig because getConfig merges OApp-specific config with
@@ -120,10 +133,34 @@ contract PathwayExpander is Ownable {
     address addedDvn
   );
   event PathwayConfigured(address indexed oapp, address indexed lib, uint32 indexed eid, bytes config);
+  event AuthorityFinalized(address indexed caller, uint64 authorityExpiry);
 
   constructor(address _owner) {
     require(_owner != address(0), "PathwayExpander: zero address");
+    authorityExpiry = uint64(block.timestamp + AUTHORITY_WINDOW);
     _transferOwnership(_owner);
+  }
+
+  /// @notice True only while an owner exists and the bootstrap window is open.
+  function authorityActive() external view returns (bool) {
+    return owner() != address(0) && block.timestamp < authorityExpiry;
+  }
+
+  /// @notice Permissionless on-chain finalization after the immutable deadline.
+  ///         Privileged calls are already disabled at expiry; this additionally
+  ///         writes owner = address(0) as an explicit final-state receipt.
+  function finalizeExpiredAuthority() external {
+    require(block.timestamp >= authorityExpiry, "PathwayExpander: authority active");
+    if (owner() != address(0)) {
+      _transferOwnership(address(0));
+      emit AuthorityFinalized(msg.sender, authorityExpiry);
+    }
+  }
+
+  /// @notice Ownership may move during bootstrap but can never be moved after
+  ///         the immutable authority deadline.
+  function transferOwnership(address newOwner) public override onlyActiveOwner {
+    super.transferOwnership(newOwner);
   }
 
   /// @notice Add a peer for a new eid on an OApp this contract owns.
@@ -135,7 +172,7 @@ contract PathwayExpander is Ownable {
   /// @param  oapp The OApp contract whose peer table we're extending.
   /// @param  eid  The new LayerZero eid to register.
   /// @param  peer The peer address (bytes32-encoded for non-EVM compat).
-  function addPeer(address oapp, uint32 eid, bytes32 peer) external onlyOwner {
+  function addPeer(address oapp, uint32 eid, bytes32 peer) external onlyActiveOwner {
     _addPeer(oapp, eid, peer);
   }
 
@@ -144,7 +181,7 @@ contract PathwayExpander is Ownable {
     address[] calldata oapps,
     uint32[] calldata eids,
     bytes32[] calldata peers
-  ) external onlyOwner {
+  ) external onlyActiveOwner {
     uint256 n = oapps.length;
     require(n == eids.length && n == peers.length, "PathwayExpander: length mismatch");
     for (uint256 i; i < n; ++i) {
@@ -175,7 +212,7 @@ contract PathwayExpander is Ownable {
   ///         can grow the KYC surface but cannot redirect an existing
   ///         level. To rotate an existing adapter, redeploy the Minter
   ///         (and CawProfile, since CawProfile.minter is immutable).
-  function addKycVerifier(address minter, uint8 level, address verifier) external onlyOwner {
+  function addKycVerifier(address minter, uint8 level, address verifier) external onlyActiveOwner {
     require(minter != address(0), "PathwayExpander: zero address");
     require(verifier != address(0), "PathwayExpander: zero verifier");
     IKycRegistrar(minter).addKycVerifier(level, verifier);
@@ -210,7 +247,7 @@ contract PathwayExpander is Ownable {
     address lib,
     uint32  eid,
     bytes calldata ulnConfig
-  ) external onlyOwner {
+  ) external onlyActiveOwner {
     require(oapp         != address(0), "PathwayExpander: zero oapp");
     require(endpointAddr != address(0), "PathwayExpander: zero endpoint");
     require(lib          != address(0), "PathwayExpander: zero lib");
@@ -261,7 +298,7 @@ contract PathwayExpander is Ownable {
     uint32  eid,
     bytes calldata currentUlnConfig,
     bytes calldata newUlnConfig
-  ) external onlyOwner {
+  ) external onlyActiveOwner {
     require(_pathwayConfigured[oapp][lib][eid], "PathwayExpander: pathway not configured");
 
     uint8 step = _dvnEscalationStep[oapp][lib][eid];

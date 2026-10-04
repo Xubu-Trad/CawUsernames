@@ -98,30 +98,34 @@ const STATE_FILE = path.join(__dirname, '../.deploy-state.json');
 // unnecessary. Set DEPLOY_GAS_MULTIPLIER=1 to use raw network prices.
 const DEPLOY_GAS_MULTIPLIER = parseFloat(process.env.DEPLOY_GAS_MULTIPLIER || '1.5');
 
-// Phase 7 (renounce / additions-only) is ALWAYS on. Every deploy ends with
-// the same trustlessness-finalizing handover so testnet matches mainnet,
-// and so the "fresh deploy" code path is exercised end-to-end every time.
+// Phase 7 ownership handoff is ALWAYS on. Every deploy ends with the same
+// trust-boundary handoff so testnet matches mainnet and the fresh-deploy path
+// is exercised end-to-end every time.
+//
+// PathwayExpander itself deploys earlier, in phase 1, with a protocol-enforced
+// authority deadline. AUTHORITY_WINDOW is fixed at 120 days and
+// authorityExpiry is set from that contract's deployment-block timestamp.
+// Ownership transfer cannot extend that immutable deadline.
 //
 // What phase 7 does:
-//   1. Deploys one PathwayExpander per chain (owned by the deployer EOA).
-//   2. Transfers ownership of every LZ OApp on that chain to its expander
-//      (CawProfile + CawProfileLedger_* on L1; CawProfileLedger_<L>,
-//      CawActionsArchive_<L>, CawChallengeRelay_<L> on each L2).
-//   3. Renounces ownership on every other Ownable contract on that chain
-//      (CawActions_<L>, CawProfileURI on L1).
+//   1. Transfers ownership of every applicable LZ OApp on that chain to its
+//      already-deployed PathwayExpander.
+//   2. Renounces ownership on every other Ownable contract on that chain.
 //
-// After phase 7, the remaining global privileged authority is:
-//   - PathwayExpander.owner (= deployer EOA unless later transferred or
-//     renounced). Its additions-only surface includes addPeer/addPeers,
-//     addKycVerifier, configureNewPathway, and addDvnToPathway. Existing
-//     peers and already-configured pathways cannot be arbitrarily rewritten,
-//     and PathwayExpander exposes no path to transfer its OApps back out.
-//   - LZ EndpointV2.delegates(oapp) is wired to the corresponding
-//     PathwayExpander. This leaves new-pathway DVN/ULN configuration open
-//     through the constrained PathwayExpander surface while its ownership
-//     remains live.
-//   - PathwayExpander ownership can itself be renounced, which permanently
-//     closes these additions-only paths while preserving existing pathways.
+// While a PathwayExpander's authority window is active, its owner may use only
+// the contract's constrained privileged surface: addPeer/addPeers,
+// addKycVerifier, configureNewPathway, and addDvnToPathway. Existing peers and
+// already-configured pathways cannot be arbitrarily rewritten, and the
+// expander exposes no path to transfer its owned OApps back out.
+//
+// LZ EndpointV2.delegates(oapp) remains wired to the corresponding
+// PathwayExpander. The owner may renounce earlier. At authorityExpiry the five
+// authority-bearing methods listed above and transferOwnership become unusable
+// regardless of whether owner() has yet been zeroed. renounceOwnership remains
+// available only as an authority-reducing operation. After expiry anyone may
+// call finalizeExpiredAuthority() to write owner() to address(0). That
+// finalization does not remove existing peers, pathways, or other already-
+// written state.
 
 // The deployer wallet address (for verification)
 const EXPECTED_DEPLOYER = '0xF71338f3eAa483aA66125598B09BA1988e694a95';
@@ -2111,7 +2115,35 @@ class MultiChainDeployer {
     const address = await contract.getAddress();
     console.log(`   Deployed at: ${address}`);
 
+    let deploymentProof = null;
+    if (contractKey.startsWith('PathwayExpander_')) {
+      const deploymentTx = contract.deploymentTransaction();
+      if (!deploymentTx) {
+        throw new Error(`${contractKey}: deployment transaction unavailable`);
+      }
+
+      const receipt = await deploymentTx.wait();
+      if (!receipt || receipt.blockNumber == null) {
+        throw new Error(`${contractKey}: deployment receipt unavailable`);
+      }
+
+      deploymentProof = {
+        transactionHash: deploymentTx.hash,
+        blockNumber: receipt.blockNumber,
+      };
+
+      console.log(
+        `   Recorded deployment proof: tx=${deploymentTx.hash} block=${receipt.blockNumber}`
+      );
+    }
+
     this.state.addresses[contractKey] = address;
+
+    if (deploymentProof) {
+      this.state.deployments = this.state.deployments || {};
+      this.state.deployments[contractKey] = deploymentProof;
+    }
+
     this.contracts[contractKey] = contract;
     this.saveState();
 

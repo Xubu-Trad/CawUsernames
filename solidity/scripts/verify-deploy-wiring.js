@@ -118,6 +118,142 @@ function warn(name, detail) {
   warnings++;
 }
 
+const EXPECTED_AUTHORITY_WINDOW = 120n * 24n * 60n * 60n;
+
+async function verifyPathwayExpanderAuthority(abstractChain, contractKey) {
+  console.log(`\n${contractKey} authority proof:`);
+
+  const address = A[contractKey];
+  if (!address) {
+    ok(`${contractKey}.address present`, false, 'missing from deploy state');
+    return;
+  }
+
+  const proof = state.deployments?.[contractKey];
+  if (!proof || !proof.transactionHash || proof.blockNumber == null) {
+    ok(
+      `${contractKey}.deployment proof metadata`,
+      false,
+      'missing transactionHash/blockNumber; fresh proof-enabled deployment required'
+    );
+    return;
+  }
+
+  const provider = providerFor(abstractChain);
+
+  try {
+    const receipt = await provider.getTransactionReceipt(proof.transactionHash);
+
+    if (!receipt) {
+      ok(`${contractKey}.deployment receipt`, false, proof.transactionHash);
+      return;
+    }
+
+    ok(
+      `${contractKey}.deployment receipt status`,
+      receipt.status === 1,
+      `status=${receipt.status}`
+    );
+
+    eq(
+      `${contractKey}.receipt.contractAddress`,
+      receipt.contractAddress,
+      address
+    );
+
+    ok(
+      `${contractKey}.receipt.blockNumber`,
+      Number(receipt.blockNumber) === Number(proof.blockNumber),
+      `state=${proof.blockNumber} chain=${receipt.blockNumber}`
+    );
+
+    const deployBlock = await provider.getBlock(receipt.blockNumber);
+    if (!deployBlock) {
+      ok(
+        `${contractKey}.deployment block`,
+        false,
+        `block=${receipt.blockNumber}`
+      );
+      return;
+    }
+
+    const latestBlock = await provider.getBlock('latest');
+    if (!latestBlock) {
+      ok(`${contractKey}.latest block`, false, 'unavailable');
+      return;
+    }
+
+    const expander = new ethers.Contract(
+      address,
+      [
+        'function owner() view returns (address)',
+        'function AUTHORITY_WINDOW() view returns (uint64)',
+        'function authorityExpiry() view returns (uint64)',
+        'function authorityActive() view returns (bool)',
+      ],
+      provider
+    );
+
+    // A receipt can be visible before an immediately-following "latest"
+    // observation catches up. Never make historical contract calls against
+    // a block earlier than the verified deployment block.
+    const observationBlock =
+      Number(latestBlock.number) < Number(receipt.blockNumber)
+        ? deployBlock
+        : latestBlock;
+
+    const blockTag = observationBlock.number;
+
+    const [owner, windowRaw, expiryRaw, active] = await Promise.all([
+      expander.owner({ blockTag }),
+      expander.AUTHORITY_WINDOW({ blockTag }),
+      expander.authorityExpiry({ blockTag }),
+      expander.authorityActive({ blockTag }),
+    ]);
+
+    const window = BigInt(windowRaw);
+    const expiry = BigInt(expiryRaw);
+    const deployTimestamp = BigInt(deployBlock.timestamp);
+    const observationTimestamp = BigInt(observationBlock.timestamp);
+
+    ok(
+      `${contractKey}.AUTHORITY_WINDOW == 120 days`,
+      window === EXPECTED_AUTHORITY_WINDOW,
+      `onchain=${window} expected=${EXPECTED_AUTHORITY_WINDOW}`
+    );
+
+    const expectedExpiry = deployTimestamp + window;
+
+    ok(
+      `${contractKey}.authorityExpiry anchored to deployment block`,
+      expiry === expectedExpiry,
+      `onchain=${expiry} expected=${expectedExpiry} deployTimestamp=${deployTimestamp}`
+    );
+
+    const expectedActive =
+      !ZERO(owner) && observationTimestamp < expiry;
+
+    ok(
+      `${contractKey}.authorityActive consistent`,
+      active === expectedActive,
+      `owner=${owner} observationBlock=${blockTag} observationTimestamp=${observationTimestamp} expiry=${expiry} active=${active}`
+    );
+
+    console.log(`     tx:        ${proof.transactionHash}`);
+    console.log(`     block:     ${receipt.blockNumber}`);
+    console.log(`     timestamp: ${deployTimestamp}`);
+    console.log(`     owner:     ${owner}`);
+    console.log(`     expiry:    ${expiry}`);
+    console.log(`     active:    ${active}`);
+  } catch (e) {
+    ok(
+      `${contractKey}.authority proof execution`,
+      false,
+      e.message
+    );
+  }
+}
+
 async function main() {
   console.log('verify-deploy-wiring.js — post-deploy sanity check\n');
 
@@ -258,6 +394,17 @@ async function main() {
       await epL.delegates(A[`CawActionsArchive_${L}`]), A[`PathwayExpander_${L}`]);
     eq(`Endpoint(${L}).delegates(CawChallengeRelay_${L})`,
       await epL.delegates(A[`CawChallengeRelay_${L}`]), A[`PathwayExpander_${L}`]);
+  }
+
+  // -----------------------------------------------------------------
+  // PathwayExpander authority-expiry proofs
+  // -----------------------------------------------------------------
+  console.log('\n===== PathwayExpander authority expiry =====');
+
+  await verifyPathwayExpanderAuthority('L1', 'PathwayExpander_L1');
+
+  for (const L of L2_CHAIN_KEYS) {
+    await verifyPathwayExpanderAuthority(L, `PathwayExpander_${L}`);
   }
 
   // -----------------------------------------------------------------
