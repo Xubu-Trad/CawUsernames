@@ -98,34 +98,29 @@ const STATE_FILE = path.join(__dirname, '../.deploy-state.json');
 // unnecessary. Set DEPLOY_GAS_MULTIPLIER=1 to use raw network prices.
 const DEPLOY_GAS_MULTIPLIER = parseFloat(process.env.DEPLOY_GAS_MULTIPLIER || '1.5');
 
-// Phase 7 ownership handoff is ALWAYS on. Every deploy ends with the same
-// trust-boundary handoff so testnet matches mainnet and the fresh-deploy path
-// is exercised end-to-end every time.
+// Phase 7 bootstrap finalization is ALWAYS on. Every completed deploy must
+// finish with no live PathwayExpander owner so testnet and mainnet exercise
+// the same R2 trust boundary.
 //
-// PathwayExpander itself deploys earlier, in phase 1, with a protocol-enforced
-// authority deadline. AUTHORITY_WINDOW is fixed at 120 days and
-// authorityExpiry is set from that contract's deployment-block timestamp.
-// Ownership transfer cannot extend that immutable deadline.
+// During the deployment transaction sequence the deployer temporarily owns
+// each PathwayExpander because deterministic cross-chain wiring has to be
+// performed by some signer. That temporary authority is NOT an operational
+// role and is never transferable.
 //
-// What phase 7 does:
-//   1. Transfers ownership of every applicable LZ OApp on that chain to its
-//      already-deployed PathwayExpander.
-//   2. Renounces ownership on every other Ownable contract on that chain.
+// Phase 7:
+//   1. completes all remaining peer/ownership wiring and read-back assertions;
+//   2. irreversibly calls finalizeBootstrap() on every PathwayExpander;
+//   3. records the finalization transaction proof.
 //
-// While a PathwayExpander's authority window is active, its owner may use only
-// the contract's constrained privileged surface: addPeer/addPeers,
-// addKycVerifier, configureNewPathway, and addDvnToPathway. Existing peers and
-// already-configured pathways cannot be arbitrarily rewritten, and the
-// expander exposes no path to transfer its owned OApps back out.
+// A deployment is incomplete if any PathwayExpander owner remains non-zero.
+// transferOwnership is disabled in the contract, so bootstrap authority cannot
+// be moved to a multisig or replacement operator.
 //
-// LZ EndpointV2.delegates(oapp) remains wired to the corresponding
-// PathwayExpander. The owner may renounce earlier. At authorityExpiry the five
-// authority-bearing methods listed above and transferOwnership become unusable
-// regardless of whether owner() has yet been zeroed. renounceOwnership remains
-// available only as an authority-reducing operation. After expiry anyone may
-// call finalizeExpiredAuthority() to write owner() to address(0). That
-// finalization does not remove existing peers, pathways, or other already-
-// written state.
+// EndpointV2 may continue to record PathwayExpander as an OApp delegate and
+// some OApps may continue to record PathwayExpander as owner. Once the
+// PathwayExpander owner is zero, however, no human key can exercise its
+// owner-gated bootstrap methods. Existing peers and written configuration
+// remain unchanged.
 
 // The deployer wallet address (for verification)
 const EXPECTED_DEPLOYER = '0xF71338f3eAa483aA66125598B09BA1988e694a95';
@@ -679,15 +674,14 @@ const CONTRACTS = {
     constructorArgs: () => [],
     condition: (_state, _deployer, env) => env === 'dev',
   },
-  // PathwayExpander on L1. Phase 1 (was phase 7) so its address is available
-  // when CawProfile's constructor runs at phase 2 — CawProfile now transfers
-  // OApp ownership to PathwayExpander directly via _transferOwnership at deploy
-  // time. PathwayExpander still owns CawProfileLedger_L1 via the phase 7 linking
-  // step for that one (L2 hasn't moved to constructor-handover yet).
+  // PathwayExpander on L1. Phase 1 so its address exists before CawProfile
+  // deploys in phase 2. CawProfile transfers its ownership directly to the
+  // expander in its constructor. CawProfileLedger_L1 instead renounces its
+  // own ownership in its constructor; it is not PathwayExpander-owned.
   //
-  // Owner of the expander itself is the deployer EOA (constructor arg below);
-  // transfer this to a multisig later if desired before the deployer
-  // walks away completely.
+  // The expander's temporary owner is the deployer only for deployment
+  // bootstrap. transferOwnership is disabled, and phase 7 MUST irreversibly
+  // finalize the expander to owner()==address(0).
   PathwayExpander_L1: {
     artifact: 'PathwayExpander',
     chain: 'L1',
@@ -1139,22 +1133,19 @@ const LINKING_STEPS = [
   },
 
   // -----------------------------------------------------------------
-  // Phase 7: renounce / additions-only finalization
+  // Phase 7: complete wiring, prove it, then close bootstrap authority.
   // -----------------------------------------------------------------
-  // Always runs — every deploy ends with the trustlessness handover so
-  // testnet matches mainnet and the "fresh deploy" path stays exercised.
+  // PathwayExpander is allowed to act only while deployment is still in
+  // progress. The final Phase-7 entries added below call finalizeBootstrap()
+  // on every chain after all PathwayExpander-dependent peer operations and
+  // critical read-back assertions have been appended.
   //
-  // Step style:
-  //   - LZ OApps: transferOwnership(PathwayExpander_<chain>). The
-  //     expander's addPeer is the only future write path (and even
-  //     that's blocked by per-eid OnlyOnce on the OApps themselves).
-  //   - Plain Ownables (CawActions_<chain>, CawProfileURI on L1):
-  //     renounceOwnership(). No future admin operations needed.
+  // Completed deployment invariant:
   //
-  // Each step has a skipIf that compares the live owner to the target
-  // (expander address for transfers, address(0) for renounces), so a
-  // re-run is idempotent — the second run sees "already done" and exits
-  // the step without sending a tx.
+  //     PathwayExpander_<chain>.owner() == address(0)
+  //
+  // Any failure to reach that state is fatal. A partially-run deployment with
+  // a live expander owner must not be treated as a valid released protocol.
   // -----------------------------------------------------------------
   // CawProfile ownership handover moved INTO the constructor — see the
   // CawProfile entry in CONTRACTS. The deployer EOA never owns CawProfile
@@ -1378,8 +1369,9 @@ for (const L of L2_CHAIN_KEYS) {
   //   CawActions_<L>
   // -----------------------------------------------------------------
   // CawProfileLedger_${L} renounces ownership IN its constructor — no phase-7
-  // transferOwnership step. CawActionsArchive and CawChallengeRelay still need
-  // PathwayExpander as owner (they keep an admin surface for adding new L2 peers).
+  // transferOwnership step. CawActionsArchive and CawChallengeRelay use
+  // PathwayExpander as their fixed owner address, but the expander itself is
+  // irreversibly finalized to owner()==address(0) later in this phase.
   for (const oapp of [`CawActionsArchive_${L}`, `CawChallengeRelay_${L}`]) {
     LINKING_STEPS.push({
       name: `[Phase 7] Transfer ${oapp} ownership → PathwayExpander_${L}`,
@@ -1513,6 +1505,89 @@ for (const consumerKey of ['CawNetworkManager', 'CawBuyAndBurn']) {
         );
       }
       console.log(`   Assertion passed: ${consumerKey}.cawProfile()==CawProfile (${expected})`);
+    },
+  });
+}
+
+// =============================================================================
+// Phase 7 final step — irreversibly close every PathwayExpander bootstrap owner.
+// =============================================================================
+for (const abstractChain of ['L1', ...L2_CHAIN_KEYS]) {
+  const expanderKey = `PathwayExpander_${abstractChain}`;
+
+  LINKING_STEPS.push({
+    name: `[Phase 7] Finalize ${expanderKey} bootstrap authority`,
+    chain: abstractChain,
+    phase: 7,
+    condition: (state) => !!state.addresses[expanderKey],
+    custom: async (state, deployer) => {
+      try {
+        const expander = deployer.getContract(expanderKey);
+
+        if (!expander) {
+        throw new FatalDeployError(
+          `${expanderKey} handle missing — cannot finalize bootstrap authority`
+        );
+      }
+
+      const ownerBefore = await expander.owner();
+
+      if (ownerBefore.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
+        const priorProof = state.finalizations?.[expanderKey];
+
+        if (!priorProof?.transactionHash || priorProof.blockNumber == null) {
+          throw new FatalDeployError(
+            `${expanderKey} owner is already zero but finalization proof metadata is missing. ` +
+            `A fresh proof-enabled deployment is required.`
+          );
+        }
+
+        console.log(
+          `   ${expanderKey} already finalized: owner=${ownerBefore} ` +
+          `tx=${priorProof.transactionHash} block=${priorProof.blockNumber}`
+        );
+        return;
+      }
+
+      const tx = await expander.finalizeBootstrap();
+      const receipt = await tx.wait();
+
+      if (!receipt || receipt.status !== 1 || receipt.blockNumber == null) {
+        throw new FatalDeployError(
+          `${expanderKey} finalizeBootstrap transaction failed`
+        );
+      }
+
+      const ownerAtFinalization = await expander.owner({
+        blockTag: receipt.blockNumber,
+      });
+
+      if (ownerAtFinalization.toLowerCase() !== ethers.ZeroAddress.toLowerCase()) {
+        throw new FatalDeployError(
+          `${expanderKey} finalizeBootstrap mined but owner remained ${ownerAtFinalization}`
+        );
+      }
+
+      state.finalizations = state.finalizations || {};
+      state.finalizations[expanderKey] = {
+        transactionHash: tx.hash,
+        blockNumber: receipt.blockNumber,
+      };
+
+      deployer.saveState();
+
+        console.log(
+          `   Finalized ${expanderKey}: tx=${tx.hash} block=${receipt.blockNumber}`
+        );
+      } catch (e) {
+        if (e instanceof FatalDeployError) {
+          throw e;
+        }
+
+        throw new FatalDeployError(
+          `${expanderKey} bootstrap finalization failed: ${e.message}`
+        );
+      }
     },
   });
 }

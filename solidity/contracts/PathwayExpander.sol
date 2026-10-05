@@ -30,61 +30,38 @@ interface ILzEndpoint {
 }
 
 /// @title PathwayExpander
-/// @notice Becomes the owner AND LZ delegate of every CAW OApp (CawProfile,
-///         CawProfileLedger, CawActionsArchive, CawChallengeRelay) so that
-///         the deployer EOA can renounce its direct authority over them while
-///         still leaving the door open for TWO specific operations: adding
-///         peers for new eids, and configuring DVN/ULN settings for NEW
-///         (oapp, eid) pathways.
+/// @notice Deployment-bootstrap authority for CAW LayerZero wiring.
 ///
-///         The original CAW OApps already gate setPeer per-eid via
-///         OnlyOnce, so existing peers can never be reconfigured. This
-///         contract reinforces that with its own check (peers[eid] == 0
-///         required) — defense in depth.
+///         PathwayExpander is not intended to be a post-deployment
+///         administrator. During deployment its temporary owner may perform
+///         only the constrained bootstrap operations exposed below:
+///         peer registration, additions-only KYC registration, and bounded
+///         LayerZero pathway/DVN configuration.
 ///
-///         For DVN config, PathwayExpander maintains its own
-///         `_pathwayConfigured` bitmap so that existing pathway configs
-///         can never be overwritten — additions-only. A compromised
-///         expander key can add malicious DVN config for NEW pathways
-///         but cannot rewrite existing ones. Same compromise profile as
-///         addPeer.
+///         A deployment is not considered complete until finalizeBootstrap()
+///         irreversibly writes owner() to address(0). After that point every
+///         owner-gated entrypoint is permanently inert while already-written
+///         peers, ownership relationships, and LayerZero delegate wiring
+///         remain in place.
 ///
-///         There is no path to:
-///           - reconfigure existing peers,
-///           - rewrite existing DVN configs,
-///           - call any other OnlyOwner function on the underlying OApp,
-///           - transfer the OApp's ownership to anything else.
-///         If a future protocol wants any of those, it has to deploy a
-///         new PathwayExpander variant and migrate ownership *before*
-///         this one is renounced.
+/// @dev transferOwnership is deliberately disabled. Bootstrap authority cannot
+///      be handed to a multisig, replacement operator, or other privileged
+///      actor. The inherited renounceOwnership() remains available as an
+///      equivalent authority-reducing operation.
 ///
-/// @dev Trust profile: this contract has its own owner (the deployer or
-///      whatever address it's transferred to). The owner can call
-///      addPeer / configureNewPathway to bring up new pathways. The owner
-///      CANNOT pull ownership of the underlying OApps back out — there is
-///      no "transferOApp" function. This is intentional: the upstream
-///      OApps' OnlyOnce per-eid guards are what make existing pathways
-///      immutable, and this contract preserves that property.
+///      Some CAW OApps remain owned by this contract after bootstrap because
+///      their ownership address is part of the fixed wiring. Other OApps
+///      renounce ownership directly. PathwayExpander may also remain registered
+///      as a LayerZero delegate. None of those address relationships imply a
+///      live human administrator after owner() has been finalized to zero.
 ///
-///      The owner CAN renounceOwnership() on this contract, which
-///      neutralizes the additions-only path entirely (no new chains
-///      ever again, but all existing pathways keep working).
+///      Future chain expansion or post-deployment DVN changes require a new
+///      peer-reviewed deployment/version or a separately-reviewed
+///      permissionless mechanism; this contract deliberately retains no human
+///      expansion key after deployment.
 contract PathwayExpander is Ownable {
   // ULN config type id — LZ V2 standard (CONFIG_TYPE_EXECUTOR=1, CONFIG_TYPE_ULN=2).
   uint32 public constant CONFIG_TYPE_ULN = 2;
-
-  /// @notice Maximum lifetime of the privileged bootstrap authority.
-  ///         The deadline is fixed at deployment and cannot be extended.
-  uint64 public constant AUTHORITY_WINDOW = 120 days;
-
-  /// @notice Timestamp after which every privileged expansion path is disabled.
-  uint64 public immutable authorityExpiry;
-
-  modifier onlyActiveOwner() {
-    _checkOwner();
-    require(block.timestamp < authorityExpiry, "PathwayExpander: authority expired");
-    _;
-  }
 
   /// @dev Tracks which (oapp, lib, eid) DVN configs have already been set via
   ///      configureNewPathway. The check uses a nested mapping rather than
@@ -133,34 +110,27 @@ contract PathwayExpander is Ownable {
     address addedDvn
   );
   event PathwayConfigured(address indexed oapp, address indexed lib, uint32 indexed eid, bytes config);
-  event AuthorityFinalized(address indexed caller, uint64 authorityExpiry);
+  event BootstrapFinalized(address indexed formerOwner);
 
   constructor(address _owner) {
     require(_owner != address(0), "PathwayExpander: zero address");
-    authorityExpiry = uint64(block.timestamp + AUTHORITY_WINDOW);
     _transferOwnership(_owner);
   }
 
-  /// @notice True only while an owner exists and the bootstrap window is open.
-  function authorityActive() external view returns (bool) {
-    return owner() != address(0) && block.timestamp < authorityExpiry;
+  /// @notice Bootstrap authority may never be transferred to another actor.
+  /// @dev This deliberately rules out replacing the deployer with a multisig,
+  ///      recovery operator, or other persistent privileged controller.
+  function transferOwnership(address) public override {
+    revert("PathwayExpander: ownership transfer disabled");
   }
 
-  /// @notice Permissionless on-chain finalization after the immutable deadline.
-  ///         Privileged calls are already disabled at expiry; this additionally
-  ///         writes owner = address(0) as an explicit final-state receipt.
-  function finalizeExpiredAuthority() external {
-    require(block.timestamp >= authorityExpiry, "PathwayExpander: authority active");
-    if (owner() != address(0)) {
-      _transferOwnership(address(0));
-      emit AuthorityFinalized(msg.sender, authorityExpiry);
-    }
-  }
-
-  /// @notice Ownership may move during bootstrap but can never be moved after
-  ///         the immutable authority deadline.
-  function transferOwnership(address newOwner) public override onlyActiveOwner {
-    super.transferOwnership(newOwner);
+  /// @notice Irreversibly closes deployment-bootstrap authority.
+  /// @dev Deployment tooling MUST call this after all required wiring and
+  ///      read-back assertions succeed. Existing protocol state is preserved.
+  function finalizeBootstrap() external onlyOwner {
+    address formerOwner = owner();
+    _transferOwnership(address(0));
+    emit BootstrapFinalized(formerOwner);
   }
 
   /// @notice Add a peer for a new eid on an OApp this contract owns.
@@ -172,7 +142,7 @@ contract PathwayExpander is Ownable {
   /// @param  oapp The OApp contract whose peer table we're extending.
   /// @param  eid  The new LayerZero eid to register.
   /// @param  peer The peer address (bytes32-encoded for non-EVM compat).
-  function addPeer(address oapp, uint32 eid, bytes32 peer) external onlyActiveOwner {
+  function addPeer(address oapp, uint32 eid, bytes32 peer) external onlyOwner {
     _addPeer(oapp, eid, peer);
   }
 
@@ -181,7 +151,7 @@ contract PathwayExpander is Ownable {
     address[] calldata oapps,
     uint32[] calldata eids,
     bytes32[] calldata peers
-  ) external onlyActiveOwner {
+  ) external onlyOwner {
     uint256 n = oapps.length;
     require(n == eids.length && n == peers.length, "PathwayExpander: length mismatch");
     for (uint256 i; i < n; ++i) {
@@ -212,7 +182,7 @@ contract PathwayExpander is Ownable {
   ///         can grow the KYC surface but cannot redirect an existing
   ///         level. To rotate an existing adapter, redeploy the Minter
   ///         (and CawProfile, since CawProfile.minter is immutable).
-  function addKycVerifier(address minter, uint8 level, address verifier) external onlyActiveOwner {
+  function addKycVerifier(address minter, uint8 level, address verifier) external onlyOwner {
     require(minter != address(0), "PathwayExpander: zero address");
     require(verifier != address(0), "PathwayExpander: zero verifier");
     IKycRegistrar(minter).addKycVerifier(level, verifier);
@@ -247,7 +217,7 @@ contract PathwayExpander is Ownable {
     address lib,
     uint32  eid,
     bytes calldata ulnConfig
-  ) external onlyActiveOwner {
+  ) external onlyOwner {
     require(oapp         != address(0), "PathwayExpander: zero oapp");
     require(endpointAddr != address(0), "PathwayExpander: zero endpoint");
     require(lib          != address(0), "PathwayExpander: zero lib");
@@ -298,7 +268,7 @@ contract PathwayExpander is Ownable {
     uint32  eid,
     bytes calldata currentUlnConfig,
     bytes calldata newUlnConfig
-  ) external onlyActiveOwner {
+  ) external onlyOwner {
     require(_pathwayConfigured[oapp][lib][eid], "PathwayExpander: pathway not configured");
 
     uint8 step = _dvnEscalationStep[oapp][lib][eid];
