@@ -204,6 +204,63 @@ async function verifyPathwayExpanderFinalized(abstractChain, contractKey) {
       `deployBlock=${deployReceipt.blockNumber} finalBlock=${finalReceipt.blockNumber}`
     );
 
+    eq(
+      `${contractKey}.finalization receipt target`,
+      finalReceipt.to,
+      address
+    );
+
+    const finalTx =
+      await provider.getTransaction(finalProof.transactionHash);
+
+    if (!finalTx) {
+      ok(`${contractKey}.finalization transaction`, false, finalProof.transactionHash);
+      return;
+    }
+
+    eq(
+      `${contractKey}.finalization transaction target`,
+      finalTx.to,
+      address
+    );
+
+    const finalizationIface = new ethers.Interface([
+      'function finalizeBootstrap()',
+      'event BootstrapFinalized(address indexed formerOwner)',
+    ]);
+
+    const expectedFinalizeData =
+      finalizationIface.encodeFunctionData('finalizeBootstrap');
+
+    ok(
+      `${contractKey}.finalization calldata == finalizeBootstrap()`,
+      finalTx.data.toLowerCase() === expectedFinalizeData.toLowerCase(),
+      `data=${finalTx.data}`
+    );
+
+    const finalizedTopic = ethers.id('BootstrapFinalized(address)');
+    const finalizedLogs = finalReceipt.logs.filter(
+      (log) =>
+        log.address.toLowerCase() === address.toLowerCase() &&
+        log.topics?.[0]?.toLowerCase() === finalizedTopic.toLowerCase()
+    );
+
+    ok(
+      `${contractKey}.BootstrapFinalized event count == 1`,
+      finalizedLogs.length === 1,
+      `count=${finalizedLogs.length}`
+    );
+
+    if (finalizedLogs.length === 1) {
+      const parsed = finalizationIface.parseLog(finalizedLogs[0]);
+
+      eq(
+        `${contractKey}.BootstrapFinalized.formerOwner == tx.from`,
+        parsed.args.formerOwner,
+        finalTx.from
+      );
+    }
+
     const expander = new ethers.Contract(
       address,
       ['function owner() view returns (address)'],
