@@ -59,6 +59,20 @@ if (!A) { console.error('No addresses in deploy state'); process.exit(1); }
 // Pull the same CHAINS map from env without re-executing deploy.js's full state machine.
 const ENV = process.env.DEPLOY_ENV || 'testnet';
 
+function shouldVerifyBootstrapFinalization(env, deployState) {
+  const hasRecordedFinalization =
+    Object.keys(deployState.finalizations || {}).length > 0;
+
+  return (
+    env === 'mainnet' ||
+    deployState.lifecycle?.finalizeBootstrapRequested === true ||
+    hasRecordedFinalization
+  );
+}
+
+const VERIFY_BOOTSTRAP_FINALIZATION =
+  shouldVerifyBootstrapFinalization(ENV, state);
+
 const CHAINS = {
   testnetL1:  { rpc: process.env.L1_RPC_URL,  lzEid: 40161, endpoint: '0x6EDCE65403992e310A62460808c4b910D972f10f' },
   testnetL2:  { rpc: process.env.L2_RPC_URL,  lzEid: 40245, endpoint: '0x6EDCE65403992e310A62460808c4b910D972f10f' },
@@ -438,10 +452,17 @@ async function main() {
   // -----------------------------------------------------------------
   console.log('\n===== PathwayExpander bootstrap finalization =====');
 
-  await verifyPathwayExpanderFinalized('L1', 'PathwayExpander_L1');
+  if (VERIFY_BOOTSTRAP_FINALIZATION) {
+    await verifyPathwayExpanderFinalized('L1', 'PathwayExpander_L1');
 
-  for (const L of L2_CHAIN_KEYS) {
-    await verifyPathwayExpanderFinalized(L, `PathwayExpander_${L}`);
+    for (const L of L2_CHAIN_KEYS) {
+      await verifyPathwayExpanderFinalized(L, `PathwayExpander_${L}`);
+    }
+  } else {
+    console.log(
+      '  skipped: non-mainnet deployment was not marked for sealed ' +
+      'bootstrap finalization'
+    );
   }
 
   // -----------------------------------------------------------------

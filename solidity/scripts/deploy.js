@@ -91,6 +91,46 @@ const RETRY_ATTEMPTS = 5;
 const RETRY_DELAY_MS = 3000;
 const STATE_FILE = path.join(__dirname, '../.deploy-state.json');
 
+function resolveFinalizeBootstrap(env, deployState = {}) {
+  const raw =
+    String(process.env.FINALIZE_BOOTSTRAP || '').trim().toLowerCase();
+
+  if (!['', '0', '1', 'false', 'true'].includes(raw)) {
+    throw new Error(
+      `Invalid FINALIZE_BOOTSTRAP=${process.env.FINALIZE_BOOTSTRAP}. ` +
+      'Use true/1 or false/0.'
+    );
+  }
+
+  const sealingAlreadyStarted =
+    deployState.lifecycle?.finalizeBootstrapRequested === true ||
+    Object.keys(deployState.finalizations || {}).length > 0;
+
+  if (env === 'mainnet') {
+    if (raw === '0' || raw === 'false') {
+      throw new Error(
+        'Mainnet is a sealed generation: FINALIZE_BOOTSTRAP cannot disable ' +
+        'PathwayExpander finalization.'
+      );
+    }
+
+    return true;
+  }
+
+  if (sealingAlreadyStarted) {
+    if (raw === '0' || raw === 'false') {
+      throw new Error(
+        'This deployment already entered the sealed bootstrap lifecycle; ' +
+        'FINALIZE_BOOTSTRAP cannot be disabled on a recovery run.'
+      );
+    }
+
+    return true;
+  }
+
+  return raw === '1' || raw === 'true';
+}
+
 // Gas price multiplier — applied to feeData.maxFeePerGas and
 // maxPriorityFeePerGas on every deploy tx to prevent "replacement fee too
 // low" mempool rejections on Sepolia. At 1.5× the first-attempt tx is
@@ -98,23 +138,28 @@ const STATE_FILE = path.join(__dirname, '../.deploy-state.json');
 // unnecessary. Set DEPLOY_GAS_MULTIPLIER=1 to use raw network prices.
 const DEPLOY_GAS_MULTIPLIER = parseFloat(process.env.DEPLOY_GAS_MULTIPLIER || '1.5');
 
-// Phase 7 bootstrap finalization is ALWAYS on. Every completed deploy must
-// finish with no live PathwayExpander owner so testnet and mainnet exercise
-// the same R2 trust boundary.
+// Phase 7 bootstrap finalization is the terminal sealed-generation transition.
+// Mainnet always seals and cannot opt out. Testnet/dev remain unsealed unless
+// FINALIZE_BOOTSTRAP=true (or 1) is explicitly requested, so operators can
+// exercise both a mutable development lifecycle and the exact terminal release
+// lifecycle.
 //
 // During the deployment transaction sequence the deployer temporarily owns
 // each PathwayExpander because deterministic cross-chain wiring has to be
-// performed by some signer. That temporary authority is NOT an operational
-// role and is never transferable.
+// performed by some signer. That authority is never transferable.
 //
-// Phase 7:
+// When sealed finalization is requested, Phase 7:
 //   1. completes all remaining peer/ownership wiring and read-back assertions;
 //   2. irreversibly calls finalizeBootstrap() on every PathwayExpander;
 //   3. records the finalization transaction proof.
 //
-// A deployment is incomplete if any PathwayExpander owner remains non-zero.
-// transferOwnership is disabled in the contract, so bootstrap authority cannot
-// be moved to a multisig or replacement operator.
+// A sealed/release deployment is incomplete if any PathwayExpander owner
+// remains non-zero. transferOwnership is disabled in the contract, so bootstrap
+// authority cannot be moved to a multisig or replacement operator.
+//
+// An unsealed non-mainnet deployment intentionally retains this constrained
+// bootstrap authority for development and topology testing. It must not be
+// represented as a sealed protocol generation.
 //
 // EndpointV2 may continue to record PathwayExpander as an OApp delegate and
 // some OApps may continue to record PathwayExpander as owner. Once the
@@ -1133,19 +1178,20 @@ const LINKING_STEPS = [
   },
 
   // -----------------------------------------------------------------
-  // Phase 7: complete wiring, prove it, then close bootstrap authority.
-  // -----------------------------------------------------------------
-  // PathwayExpander is allowed to act only while deployment is still in
-  // progress. The final Phase-7 entries added below call finalizeBootstrap()
-  // on every chain after all PathwayExpander-dependent peer operations and
-  // critical read-back assertions have been appended.
+  // Phase 7: complete wiring and, for a sealed generation, close bootstrap
+  // authority after all PathwayExpander-dependent operations and critical
+  // read-back assertions have been appended.
   //
-  // Completed deployment invariant:
+  // Mainnet always enters the sealed lifecycle. Testnet/dev enter it only when
+  // FINALIZE_BOOTSTRAP=true/1 is explicitly requested.
+  //
+  // Sealed/release deployment invariant:
   //
   //     PathwayExpander_<chain>.owner() == address(0)
   //
-  // Any failure to reach that state is fatal. A partially-run deployment with
-  // a live expander owner must not be treated as a valid released protocol.
+  // Failure to reach that state is fatal for a sealed generation. An unsealed
+  // non-mainnet deployment intentionally retains constrained bootstrap authority
+  // and is not a released/sealed protocol generation.
   // -----------------------------------------------------------------
   // CawProfile ownership handover moved INTO the constructor — see the
   // CawProfile entry in CONTRACTS. The deployer EOA never owns CawProfile
@@ -1510,7 +1556,9 @@ for (const consumerKey of ['CawNetworkManager', 'CawBuyAndBurn']) {
 }
 
 // =============================================================================
-// Phase 7 final step — irreversibly close every PathwayExpander bootstrap owner.
+// Phase 7 sealed-generation final step — close PathwayExpander bootstrap owner.
+// Mainnet always executes this step. Non-mainnet executes it only when
+// FINALIZE_BOOTSTRAP=true/1 was explicitly requested.
 // =============================================================================
 for (const abstractChain of ['L1', ...L2_CHAIN_KEYS]) {
   const expanderKey = `PathwayExpander_${abstractChain}`;
@@ -1519,7 +1567,9 @@ for (const abstractChain of ['L1', ...L2_CHAIN_KEYS]) {
     name: `[Phase 7] Finalize ${expanderKey} bootstrap authority`,
     chain: abstractChain,
     phase: 7,
-    condition: (state) => !!state.addresses[expanderKey],
+    condition: (state, deployer) =>
+      !!state.addresses[expanderKey] &&
+      deployer.finalizeBootstrapRequested === true,
     custom: async (state, deployer) => {
       try {
         const expander = deployer.getContract(expanderKey);
@@ -3061,6 +3111,12 @@ Options:
   --skip-abi          Skip ABI regeneration after deployment
   --help              Show this help
 
+Lifecycle:
+  FINALIZE_BOOTSTRAP=true
+                     Seal PathwayExpander bootstrap on testnet/dev.
+                     Once sealing starts, recovery runs remain sealed.
+                     Mainnet is always sealed and cannot opt out.
+
 Deployment Phases:
   Phase 1: Deploy CawProfileLedger on L2 + L2b (needed by L1 contracts)
   Phase 2: Deploy all L1 contracts and link them
@@ -3119,6 +3175,27 @@ After deployment, ABIs are automatically regenerated for the frontend.
     }
     return;
   }
+
+  const finalizeBootstrapRequested =
+    resolveFinalizeBootstrap(env, deployer.state);
+
+  deployer.finalizeBootstrapRequested =
+    finalizeBootstrapRequested;
+
+  deployer.state.lifecycle = {
+    ...(deployer.state.lifecycle || {}),
+    finalizeBootstrapRequested,
+  };
+
+  deployer.saveState();
+
+  console.log(
+    `\nBootstrap lifecycle: ${
+      finalizeBootstrapRequested
+        ? 'SEALED — PathwayExpander finalization required'
+        : 'UNSEALED DEVELOPMENT — PathwayExpander finalization skipped'
+    }`
+  );
 
   if (contractToRedeploy) {
     await deployer.redeploy(contractToRedeploy);

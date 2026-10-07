@@ -38,11 +38,13 @@ interface ILzEndpoint {
 ///         peer registration, additions-only KYC registration, and bounded
 ///         LayerZero pathway/DVN configuration.
 ///
-///         A deployment is not considered complete until finalizeBootstrap()
-///         irreversibly writes owner() to address(0). After that point every
-///         owner-gated entrypoint is permanently inert while already-written
-///         peers, ownership relationships, and LayerZero delegate wiring
-///         remain in place.
+///         A sealed/release deployment is not considered complete until
+///         finalizeBootstrap() irreversibly writes owner() to address(0).
+///         Development/testnet generations may intentionally remain unsealed
+///         so topology and dependency changes can be exercised before the
+///         terminal production lifecycle. After finalization every owner-gated
+///         entrypoint is permanently inert while already-written peers,
+///         ownership relationships, and LayerZero delegate wiring remain.
 ///
 /// @dev transferOwnership is deliberately disabled. Bootstrap authority cannot
 ///      be handed to a multisig, replacement operator, or other privileged
@@ -55,10 +57,10 @@ interface ILzEndpoint {
 ///      as a LayerZero delegate. None of those address relationships imply a
 ///      live human administrator after owner() has been finalized to zero.
 ///
-///      Future chain expansion or post-deployment DVN changes require a new
-///      peer-reviewed deployment/version or a separately-reviewed
-///      permissionless mechanism; this contract deliberately retains no human
-///      expansion key after deployment.
+///      After sealed finalization, future chain expansion or post-deployment
+///      DVN changes require a new peer-reviewed deployment/version or a
+///      separately-reviewed permissionless mechanism; this contract
+///      deliberately retains no human expansion key in a sealed generation.
 contract PathwayExpander is Ownable {
   // ULN config type id — LZ V2 standard (CONFIG_TYPE_EXECUTOR=1, CONFIG_TYPE_ULN=2).
   uint32 public constant CONFIG_TYPE_ULN = 2;
@@ -125,8 +127,9 @@ contract PathwayExpander is Ownable {
   }
 
   /// @notice Irreversibly closes deployment-bootstrap authority.
-  /// @dev Deployment tooling MUST call this after all required wiring and
-  ///      read-back assertions succeed. Existing protocol state is preserved.
+  /// @dev Sealed/release deployment tooling MUST call this after all required
+  ///      wiring and read-back assertions succeed. Existing protocol state is
+  ///      preserved.
   function finalizeBootstrap() external onlyOwner {
     address formerOwner = owner();
     _transferOwnership(address(0));
