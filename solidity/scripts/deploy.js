@@ -1172,6 +1172,7 @@ const LINKING_STEPS = [
     // every testnet run reports "Failed: configureLzDvns is not defined"
     // even though nothing went wrong.
     condition: (_state, _deployer, env) => env === 'mainnet',
+    sealedRequired: (_state, _deployer, env) => env === 'mainnet',
     custom: async (state, deployer, chainConfig) => {
       await configureLzDvns(state, deployer, chainConfig, CHAINS, L2_CHAIN_KEYS);
     },
@@ -1423,6 +1424,7 @@ for (const L of L2_CHAIN_KEYS) {
       name: `[Phase 7] Transfer ${oapp} ownership → PathwayExpander_${L}`,
       chain: L,
       phase: 7,
+      sealedRequired: true,
       contract: oapp,
       method: 'transferOwnership',
       args: (state) => [state.addresses[`PathwayExpander_${L}`]],
@@ -1469,6 +1471,7 @@ for (const L of L2_CHAIN_KEYS) {
     name: `Assert CawProfileLedger_${L}.peers(L1) == CawProfile (cross-chain peer read-back)`,
     chain: L,
     phase: 7,
+    sealedRequired: true,
     condition: (state) => state.addresses[`CawProfileLedger_${L}`] && state.addresses.CawProfile,
     custom: async (state, deployer) => {
       const ledger = deployer.getContract(`CawProfileLedger_${L}`);
@@ -1494,6 +1497,7 @@ for (const L of L2_CHAIN_KEYS) {
     name: `Assert CawProfile.peers(${L}) == CawProfileLedger_${L} (cross-chain peer read-back)`,
     chain: 'L1',
     phase: 7,
+    sealedRequired: true,
     condition: (state) => state.addresses.CawProfile && state.addresses[`CawProfileLedger_${L}`],
     custom: async (state, deployer) => {
       const profile = deployer.getContract('CawProfile');
@@ -1529,6 +1533,7 @@ for (const consumerKey of ['CawNetworkManager', 'CawBuyAndBurn']) {
     name: `Assert ${consumerKey}.cawProfile == CawProfile (setter-wired consumer read-back)`,
     chain: 'L1',
     phase: 7,
+    sealedRequired: true,
     condition: (state) => state.addresses[consumerKey] && state.addresses.CawProfile,
     custom: async (state, deployer) => {
       const consumer = deployer.getContract(consumerKey);
@@ -1567,6 +1572,8 @@ for (const abstractChain of ['L1', ...L2_CHAIN_KEYS]) {
     name: `[Phase 7] Finalize ${expanderKey} bootstrap authority`,
     chain: abstractChain,
     phase: 7,
+    sealedRequired: true,
+    sealedFinalizer: true,
     condition: (state, deployer) =>
       !!state.addresses[expanderKey] &&
       deployer.finalizeBootstrapRequested === true,
@@ -1661,6 +1668,7 @@ LINKING_STEPS.push({
   name: '[Phase 7.9] Approve Minter to spend sponsor CAW (sponsored bootstrap)',
   chain: 'L1',
   phase: 7,
+  sealedPostFinalizer: true,
   condition: (state) => !!state.addresses.CawProfileMinter && !!state.addresses.MintableCaw,
   custom: async (state, deployer) => {
     const minterAddr = state.addresses.CawProfileMinter;
@@ -2297,11 +2305,33 @@ class MultiChainDeployer {
     return this.contracts[contractKey];
   }
 
+  isSealedRequiredStep(step) {
+    if (this.finalizeBootstrapRequested !== true) {
+      return false;
+    }
+
+    if (typeof step.sealedRequired === 'function') {
+      return step.sealedRequired(
+        this.state,
+        this,
+        this.env
+      ) === true;
+    }
+
+    return step.sealedRequired === true;
+  }
+
   async executeLink(step) {
     const chainKey = this.getChainKey(step.chain);
     await this.initChain(chainKey);
 
     if (step.condition && !step.condition(this.state, this, this.env)) {
+      if (this.isSealedRequiredStep(step)) {
+        throw new FatalDeployError(
+          `Required sealed deployment step condition not met: ${step.name}`
+        );
+      }
+
       console.log(`  Skipping "${step.name}" - condition not met`);
       return;
     }
@@ -2359,6 +2389,12 @@ class MultiChainDeployer {
 
     const contract = this.getContract(step.contract);
     if (!contract) {
+      if (this.isSealedRequiredStep(step)) {
+        throw new FatalDeployError(
+          `Required sealed deployment contract unavailable: ${step.contract} (${step.name})`
+        );
+      }
+
       console.warn(`  Contract ${step.contract} not available, skipping "${step.name}"`);
       return;
     }
@@ -2452,40 +2488,92 @@ class MultiChainDeployer {
     // Run linking steps for this phase. Steps on different chains run in
     // parallel; steps on the same chain run sequentially (nonce ordering).
     const phaseLinks = LINKING_STEPS.filter(s => s.phase === phase);
-    if (phaseLinks.length > 0) {
-      // Group by chain
+
+    // A sealed Phase 7 has explicit generation-wide sequencing:
+    //
+    //   pass 1: pre-finalization wiring + required verification;
+    //   pass 2: PathwayExpander finalization;
+    //   pass 3: existing post-finalization Phase 7.9 work.
+    //
+    // Workers inside a pass may still run across chains concurrently, but no
+    // finalizer is eligible to start until every pass-1 chain worker settles
+    // successfully. Post-finalization work retains its historical position
+    // after the finalizer pass.
+    const linkPasses =
+      phase === 7 && this.finalizeBootstrapRequested === true
+        ? [
+            phaseLinks.filter(
+              step =>
+                step.sealedFinalizer !== true &&
+                step.sealedPostFinalizer !== true
+            ),
+            phaseLinks.filter(
+              step => step.sealedFinalizer === true
+            ),
+            phaseLinks.filter(
+              step => step.sealedPostFinalizer === true
+            ),
+          ]
+        : [phaseLinks];
+
+    for (const linksInPass of linkPasses) {
+      if (linksInPass.length === 0) {
+        continue;
+      }
+
+      // Group by chain. Each chain stays sequential for nonce ordering;
+      // independent chains may execute concurrently within this pass.
       const linksByChain = {};
-      for (const step of phaseLinks) {
+
+      for (const step of linksInPass) {
         const chain = step.chain;
-        if (!linksByChain[chain]) linksByChain[chain] = [];
+
+        if (!linksByChain[chain]) {
+          linksByChain[chain] = [];
+        }
+
         linksByChain[chain].push(step);
       }
 
-      // Run each chain's steps sequentially, but all chains in parallel.
-      // Ordinary step failures are logged and skipped (one bad setPeer must not
-      // kill the whole run). A FatalDeployError means the generation is dead —
-      // re-throw it out of the chain worker so it surfaces in the settled
-      // results below and aborts the deploy BEFORE finalization writes the
-      // broken addresses to the app config.
       const settled = await Promise.allSettled(
         Object.entries(linksByChain).map(async ([chain, steps]) => {
+          void chain;
+
           for (const step of steps) {
             try {
               await this.executeLink(step);
             } catch (e) {
-              if (e instanceof FatalDeployError) throw e;  // abort — do not swallow
-              console.error(`Failed: ${step.name} - ${e.message}`);
-              // Continue with other steps on this chain
+              if (e instanceof FatalDeployError) {
+                throw e;
+              }
+
+              if (this.isSealedRequiredStep(step)) {
+                throw new FatalDeployError(
+                  `Required sealed deployment step failed: ${step.name}: ${e.message}`
+                );
+              }
+
+              console.error(
+                `Failed: ${step.name} - ${e.message}`
+              );
             }
           }
         })
       );
-      // Promise.allSettled never rejects — inspect for a fatal and re-throw so
-      // it propagates out of deployPhase → deployAll/redeploy → main(), skipping
-      // the deployments.ts / addresses.ts / config.json finalization entirely.
-      const fatal = settled.find(r => r.status === 'rejected' && r.reason instanceof FatalDeployError);
-      if (fatal) throw fatal.reason;
+
+      // Promise.allSettled itself never rejects. A fatal result from any
+      // chain aborts the phase before the next pass can begin.
+      const fatal = settled.find(
+        r =>
+          r.status === 'rejected' &&
+          r.reason instanceof FatalDeployError
+      );
+
+      if (fatal) {
+        throw fatal.reason;
+      }
     }
+
   }
 
   async deployAll() {
