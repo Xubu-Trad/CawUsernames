@@ -441,8 +441,7 @@ async function pinConfiguredLibrary({
 async function reconcileOneSide({ ethers, deployer, chainKey, oappAddress, libraryKind, peerEid, label, state, l2ChainAbstract }) {
   const libs = LZ_LIBRARIES_MAINNET[chainKey];
   if (!libs) {
-    console.log(`     ${label}: no library addresses for ${chainKey}, skipping`);
-    return 'missing';
+    throw new Error(`Missing LayerZero library configuration for ${chainKey}: ${label}`);
   }
   const libAddress = libs[libraryKind];
 
