@@ -1153,8 +1153,8 @@ const LINKING_STEPS = [
 
 
   // -----------------------------------------------------------------
-  // Phase 6: LZ DVN config — mainnet only, 3-of-3 required DVN set
-  // (LayerZero Labs + Nethermind + Google Cloud) on every cross-chain
+  // Phase 6: LZ DVN config — mainnet only, 2-of-3 optional DVN threshold
+  // (Canary + LayerZero Labs + Horizen; no required DVNs) on every cross-chain
   // pathway. See scripts/lz-dvn-config.js for the rationale + address
   // provenance. Idempotent: reads on-chain config first and only sends
   // tx if a pathway is misconfigured.
@@ -1164,7 +1164,7 @@ const LINKING_STEPS = [
   // via deployer.initChain(chainKey).
   // -----------------------------------------------------------------
   {
-    name: 'Configure LZ DVN set (3-of-3: LayerZero Labs + Nethermind + Google Cloud)',
+    name: 'Configure LZ DVN set (2-of-3 optional: Canary + LayerZero Labs + Horizen)',
     chain: 'L1',
     phase: 6,
     // Mainnet-only: testnet/dev rely on LayerZero's default DVN config and
