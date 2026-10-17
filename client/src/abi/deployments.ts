@@ -60,6 +60,12 @@ export interface ChainContracts {
   CawActionsERC1271?: `0x${string}`
   CawActionsArchive?: `0x${string}`
   CawChallengeRelay?: `0x${string}`
+
+  // Deployment provenance for deterministic fresh-node replay.
+  // These describe the CawActions contract in THIS chain block, not an
+  // unrelated L1 NetworkCreated height or a later post-deploy head sample.
+  CawActionsCreationBlock?: number
+  CawActionsDeploymentTx?: `0x${string}`
 }
 
 export type Deployments = Record<Env, Partial<Record<ChainKey, ChainContracts>>>
@@ -81,6 +87,8 @@ export const deployments: Deployments = {
       CawBuyAndBurn: '0x008e096877Dbf12fa5c0F07489855adE3874b4e7',
       CawActions: '0xe33339b3D826E7fC61557D7e82A4348710790136',
       CawActionsERC1271: '0x2418592Eb4bd5212b3c64408769f95F73dCb45c6',
+      CawActionsCreationBlock: 11499545,
+      CawActionsDeploymentTx: '0xbb517caa5999d0272df1945167542bab2b16eec7ce6d0f43ec0ae0e6e4f18ecd',
     },
     L2: {
       CawProfileLedger: '0x93593A023629EB84B389770d76A81C5f982F02a9',
@@ -88,6 +96,8 @@ export const deployments: Deployments = {
       CawActionsERC1271: '0x78AB5d7be8Ba2BC722f58B862c16Ee77fEcbCF74',
       CawActionsArchive: '0x2423D40BB16FcFe71821E24ae507746dc7449F74',
       CawChallengeRelay: '0xeb8ee1EB63976631bdaD061AFB04d0e4329e11E7',
+      CawActionsCreationBlock: 45547482,
+      CawActionsDeploymentTx: '0xbc363f372442a6bde30a07d77c043d6d37bdd6dbd64cd30504a4a5d27bc19e26',
     },
     L2b: {
       CawProfileLedger: '0x2B7f85B2f28d9d691947498FA8aE8eF8F4317197',
@@ -95,6 +105,8 @@ export const deployments: Deployments = {
       CawActionsERC1271: '0x5F41CB93b2a95aC6A77A4d73043dEB244EA3802F',
       CawActionsArchive: '0x3B526a24a740F8FD5Ed9688E109414Ec10786B8D',
       CawChallengeRelay: '0x10723C6e9fD79683143564df246Bf17870eff20d',
+      CawActionsCreationBlock: 298656592,
+      CawActionsDeploymentTx: '0x589e1735335c9eebcd1eccc4631972c18e878e5295383cf65b95bf7f790b3e41',
     },
   },
   mainnet: {
