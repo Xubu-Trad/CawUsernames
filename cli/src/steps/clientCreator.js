@@ -22,22 +22,26 @@ const NETWORK_MANAGER_ABI = [
 // expensive" and warrants a loud warning before the operator picks it.
 const STORAGE_CHAINS = {
   testnet: [
-    { key: 'base-sepolia',     label: 'Base Sepolia',     eid: 40245, costNote: null },
-    { key: 'arbitrum-sepolia', label: 'Arbitrum Sepolia', eid: 40231, costNote: null },
+    { key: 'base-sepolia',     label: 'Base Sepolia',     eid: 40245, chainId: 84532,  deploymentKey: 'L2',  costNote: null },
+    { key: 'arbitrum-sepolia', label: 'Arbitrum Sepolia', eid: 40231, chainId: 421614, deploymentKey: 'L2b', costNote: null },
     {
       key: 'sepolia',
       label: 'Ethereum Sepolia (L1)',
       eid: 40161,
+      chainId: 11155111,
+      deploymentKey: 'L1',
       costNote: 'extremely expensive — every action submission pays L1 gas',
     },
   ],
   mainnet: [
-    { key: 'base',     label: 'Base',     eid: 30184, costNote: null },
-    { key: 'arbitrum', label: 'Arbitrum', eid: 30110, costNote: null },
+    { key: 'base',     label: 'Base',     eid: 30184, chainId: 8453,  deploymentKey: 'L2',  costNote: null },
+    { key: 'arbitrum', label: 'Arbitrum', eid: 30110, chainId: 42161, deploymentKey: 'L2b', costNote: null },
     {
       key: 'ethereum',
       label: 'Ethereum Mainnet (L1)',
       eid: 30101,
+      chainId: 1,
+      deploymentKey: 'L1',
       costNote: 'extremely expensive — every action submission pays L1 gas (~$5-30/action at typical prices)',
     },
   ],
@@ -235,6 +239,8 @@ export async function createNetworkFlow(ctx) {
     storageChainEid,
     storageChainKey: chainEntry?.key,
     storageChainLabel: chainEntry?.label,
+    storageChainChainId: chainEntry?.chainId,
+    storageDeploymentKey: chainEntry?.deploymentKey,
   }
 }
 
