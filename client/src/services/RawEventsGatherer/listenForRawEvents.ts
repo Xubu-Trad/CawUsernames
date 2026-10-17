@@ -9,6 +9,7 @@ import SmlTxt from 'smltxt'
 import { unpackActions } from '../../utils/packActions'
 import { span } from '../../utils/trace'
 import { recordIndexerProgress } from '../../utils/indexerHealth'
+import { resolveRawEventsStartBlock } from './startBlock'
 
 /**
  * Decide the block range for one poll.
@@ -324,43 +325,24 @@ export default async function listenForRawEvents(
 
   const last = await config.rawEventsProvider.getLastProcessedEvent()
   const floorAlreadyFilled = await config.rawEventsProvider.isFloorFilled()
-  // Resolve the historical-scan start block.
-  //
-  // A configured startBlock (config.json override or Network.creationBlock) is a
-  // HARD FLOOR, even when the DB already has events. Previously `last` won
-  // unconditionally, so if any CawActions event landed ABOVE the configured
-  // startBlock before the historical scan ran (a live-poll/WS/peer event racing
-  // cold start), getLastProcessedEvent pinned the floor there and every earlier
-  // block was silently skipped — the DB looked "caught up" but was missing all
-  // history below the stray event. (zinsanjp/nyaromesama: fresh caw_v2 started
-  // ~137k blocks past the deploy block, capping Follow/Caw history.)
-  //
-  // Flooring at min(last, configured) is safe: the historical scan writes via
-  // upsert (update:{}), so re-covering an already-present range is a no-op — no
-  // double-processing, just gap-filling. So we never MISS history, and never
-  // re-process what's already there.
-  let startBlock: number
-  let resumingFromLast = false
-  if (config.startBlock !== undefined && last && floorAlreadyFilled) {
-    // Floor already filled on a prior run — the config.startBlock..last range
-    // is fully in the DB, so resume from `last` instead of re-flooring to the
-    // configured startBlock and re-scanning that whole range on every restart.
-    startBlock = last.blockNumber
-    resumingFromLast = true
+  // Resolve the historical-scan start block. A configured storage-chain
+  // floor is authoritative on a fresh DB. Existing DBs may resume from their
+  // last stored event; a fresh DB with no floor fails closed instead of
+  // silently starting at current head and presenting an incomplete history.
+  const startDecision = resolveRawEventsStartBlock(
+    config.startBlock,
+    last ? { blockNumber: last.blockNumber } : null,
+    floorAlreadyFilled,
+  )
+  const startBlock = startDecision.startBlock
+  const resumingFromLast = startDecision.resumingFromLast
+
+  if (startDecision.reason === 'floor-filled') {
     console.log(`[RawEventsGatherer] Floor already filled — resuming from last processed block ${startBlock}`)
-  } else if (config.startBlock !== undefined) {
-    startBlock = last ? Math.min(last.blockNumber, config.startBlock) : config.startBlock
-    if (last && config.startBlock < last.blockNumber) {
-      console.log(`[RawEventsGatherer] Flooring scan at configured startBlock ${config.startBlock} (last event at ${last.blockNumber} — filling history below it)`)
-    } else {
-      console.log(`[RawEventsGatherer] Starting from configured startBlock ${startBlock}`)
-    }
-  } else if (last) {
-    startBlock = last.blockNumber
-    resumingFromLast = true
-  } else {
-    startBlock = await httpProvider.getBlockNumber()
-    console.log(`[RawEventsGatherer] Fresh DB, no startBlock configured — starting from current block ${startBlock}`)
+  } else if (startDecision.reason === 'configured-backfill' && last) {
+    console.log(`[RawEventsGatherer] Flooring scan at configured startBlock ${config.startBlock} (last event at ${last.blockNumber} — filling history below it)`)
+  } else if (startDecision.reason === 'configured') {
+    console.log(`[RawEventsGatherer] Starting from configured startBlock ${startBlock}`)
   }
   // parentHash chain seed: only trust `last`'s hash when we're actually
   // resuming from it (no configured floor pulling us earlier); otherwise the
