@@ -234,5 +234,19 @@
       "message": "Pass - Verified"
     }
   },
-  "l2DeployTxHash": "0xbc363f372442a6bde30a07d77c043d6d37bdd6dbd64cd30504a4a5d27bc19e26"
+  "l2DeployTxHash": "0xbc363f372442a6bde30a07d77c043d6d37bdd6dbd64cd30504a4a5d27bc19e26",
+  "cawActionsDeployments": {
+    "L1": {
+      "blockNumber": 11499545,
+      "transactionHash": "0xbb517caa5999d0272df1945167542bab2b16eec7ce6d0f43ec0ae0e6e4f18ecd"
+    },
+    "L2": {
+      "blockNumber": 45547482,
+      "transactionHash": "0xbc363f372442a6bde30a07d77c043d6d37bdd6dbd64cd30504a4a5d27bc19e26"
+    },
+    "L2b": {
+      "blockNumber": 298656592,
+      "transactionHash": "0x589e1735335c9eebcd1eccc4631972c18e878e5295383cf65b95bf7f790b3e41"
+    }
+  }
 }
