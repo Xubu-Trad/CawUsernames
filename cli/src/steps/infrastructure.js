@@ -180,6 +180,8 @@ export async function collectInfraEarly(nodeType, ctx = {}) {
           key: created.storageChainKey,
           label: created.storageChainLabel,
           eid: created.storageChainEid,
+          chainId: created.storageChainChainId,
+          deploymentKey: created.storageDeploymentKey,
         }
       } else {
         // Operator backed out or tx failed — fall back to existing-id prompt
