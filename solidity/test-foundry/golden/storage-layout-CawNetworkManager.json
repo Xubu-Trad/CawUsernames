@@ -54,32 +54,38 @@
     "type": "t_mapping(t_uint32,t_bool)"
   },
   {
-    "label": "networkGasOverride",
+    "label": "networkSealed",
     "slot": "5",
+    "offset": 0,
+    "type": "t_mapping(t_uint32,t_bool)"
+  },
+  {
+    "label": "networkGasOverride",
+    "slot": "6",
     "offset": 0,
     "type": "t_mapping(t_uint32,t_mapping(t_bytes4,t_uint128))"
   },
   {
     "label": "nextInstanceId",
-    "slot": "6",
+    "slot": "7",
     "offset": 0,
     "type": "t_uint32"
   },
   {
     "label": "instanceOwner",
-    "slot": "7",
+    "slot": "8",
     "offset": 0,
     "type": "t_mapping(t_uint32,t_address)"
   },
   {
     "label": "instanceActive",
-    "slot": "8",
+    "slot": "9",
     "offset": 0,
     "type": "t_mapping(t_uint32,t_bool)"
   },
   {
     "label": "_authorizedSponsors",
-    "slot": "9",
+    "slot": "10",
     "offset": 0,
     "type": "t_mapping(t_uint32,t_mapping(t_address,t_bool))"
   }
