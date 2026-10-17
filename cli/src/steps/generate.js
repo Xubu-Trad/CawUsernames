@@ -20,6 +20,28 @@ const NETWORKS = {
   },
 }
 
+const DEPLOYMENT_KEY_BY_CHAIN_ID = new Map([
+  [11155111, 'L1'],
+  [84532, 'L2'],
+  [421614, 'L2b'],
+  [1, 'L1'],
+  [8453, 'L2'],
+  [42161, 'L2b'],
+])
+
+function storageChainContext(config) {
+  const net = NETWORKS[config.network || 'testnet']
+  const chainId = Number(config.storageChain?.chainId || config.l2ChainId || net.l2ChainId)
+  const deploymentKey = config.storageChain?.deploymentKey || DEPLOYMENT_KEY_BY_CHAIN_ID.get(chainId) || 'L2'
+  return { chainId, deploymentKey }
+}
+
+function deploymentManifest() {
+  const p = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../client/src/abi/deployments.ts')
+  const txt = fs.readFileSync(p, 'utf8')
+  return parseDeploymentsBlock(txt)
+}
+
 /**
  * Generate config.json and .env from collected answers, plus resolve the
  * Network's storage chain on L1 and write a per-install addresses.ts.
@@ -304,6 +326,8 @@ function parseDeploymentsBlock(txt) {
       const entryRegex = /(\w+): '(0x[a-fA-F0-9]+)'/g
       let em
       while ((em = entryRegex.exec(inner)) !== null) entries[em[1]] = em[2]
+      const numericEntryRegex = /(\w+):\s*(\d+)/g
+      while ((em = numericEntryRegex.exec(inner)) !== null) entries[em[1]] = Number(em[2])
       block[chain] = entries
     }
     result[env] = block
@@ -334,6 +358,7 @@ function parseLzEids(txt) {
 export function buildServiceList(nodeType, config) {
   const services = []
   const net = NETWORKS[config.network || 'testnet']
+  const storage = storageChainContext(config)
   // Node groupings — keep these in one place so future tweaks don't need
   // to touch every if-statement below.
   const RUNS_FRONTEND = ['full', 'frontend-api'].includes(nodeType)
@@ -389,32 +414,26 @@ export function buildServiceList(nodeType, config) {
   }
 
   if (RUNS_INDEXER) {
-    // Read l2DeployBlock from solidity/.deploy-state.json so RawEventsGatherer
-    // backfills from the right L2 block on a fresh DB. Without this, the
-    // gatherer falls back to "current head" and silently misses every
-    // historical event for this Network.
-    //
-    // Failure modes are non-fatal: a missing / malformed deploy-state file
-    // just means we don't write startBlock and the gatherer stays at
-    // current-head behavior (the same default as today). Operators can
-    // also override START_BLOCK in client/.env for backfill repair.
-    const deployStatePath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../solidity/.deploy-state.json')
-    let l2DeployBlock
+    // The selected CAW Network may store actions on Base, Arbitrum, or L1.
+    // Resolve both chain identity and historical floor from that storage
+    // chain. Never reuse Base's block height for a different chain and never
+    // use CawNetworkManager.creationBlock (an L1 height) as an L2 floor.
+    let cawActionsCreationBlock
     try {
-      const ds = JSON.parse(fs.readFileSync(deployStatePath, 'utf8'))
-      if (typeof ds?.l2DeployBlock === 'number' && ds.l2DeployBlock > 0) {
-        l2DeployBlock = ds.l2DeployBlock
+      const chainBlock = deploymentManifest()[config.network || 'testnet']?.[storage.deploymentKey]
+      if (typeof chainBlock?.CawActionsCreationBlock === 'number' && chainBlock.CawActionsCreationBlock > 0) {
+        cawActionsCreationBlock = chainBlock.CawActionsCreationBlock
       }
     } catch {
-      // .deploy-state.json missing on a contributor checkout that didn't
-      // run the deploy script — fine, just skip startBlock.
+      // Runtime fail-closed behavior when a floor is absent is a separate
+      // patch; preserve today's optional startBlock contract in this PR.
     }
     services.push({
       service: 'RawEventsGatherer',
       config: {
-        chainId: net.l2ChainId,
+        chainId: storage.chainId,
         rpcUrl: '${L2_RPC_URL}',
-        ...(l2DeployBlock ? { startBlock: l2DeployBlock } : {}),
+        ...(cawActionsCreationBlock ? { startBlock: cawActionsCreationBlock } : {}),
       }
     })
     services.push({
@@ -598,7 +617,7 @@ function buildEnvVars(nodeType, config) {
     env.PRISMA_QUERY_ENGINE_TYPE = process.env.CAW_PRISMA_QUERY_ENGINE_TYPE
   }
 
-  env.L2_CHAIN_ID = String(net.l2ChainId)
+  env.L2_CHAIN_ID = String(storageChainContext(config).chainId)
   env.L1_CHAIN_ID = String(net.l1ChainId)
   env.NETWORK = config.network || 'testnet'
 
