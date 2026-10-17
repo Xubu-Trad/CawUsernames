@@ -95,13 +95,13 @@ contract CawNetworkManager {
   uint32 public nextNetworkId = 1;
   mapping(uint32 => CawNetwork) public networks;
 
-  // Per-network lockdown flags. A network owner can independently freeze fee
-  // changes, ownership changes, or both. This lets a network commit to "trust
-  // minimized" status (renounce-equivalent) while keeping access to the gas
-  // override below — necessary because the protocol has no admin to fix
-  // future cross-chain gas miscalibrations.
+  // Per-network lockdown flags. The legacy fee/ownership locks remain for
+  // networks that intentionally keep an operator. networkSealed is the
+  // terminal decentralization state: ownerAddress is cleared and every
+  // onlyNetworkOwner control becomes unreachable.
   mapping(uint32 => bool) public networkFeesLocked;
   mapping(uint32 => bool) public networkOwnershipLocked;
+  mapping(uint32 => bool) public networkSealed;
 
   // Per-network, per-selector additive gas override for cross-chain LZ
   // messages. CawProfile reads this and adds it on top of the hardcoded
@@ -133,6 +133,7 @@ contract CawNetworkManager {
   event NetworkCreated(uint32 indexed networkId, CawNetwork network);
   event NetworkFeesLocked(uint32 indexed networkId);
   event NetworkOwnershipLocked(uint32 indexed networkId);
+  event NetworkSealed(uint32 indexed networkId);
   event NetworkGasOverrideSet(uint32 indexed networkId, bytes4 indexed selector, uint128 newAmount);
   /// @notice Emitted on every per-fee setter (setWithdrawFee/setDepositFee/setAuthFee/
   ///         setMintFee). `feeType` is a stable string label so a single event can carry
@@ -489,7 +490,10 @@ contract CawNetworkManager {
   }
 
   function isAuthorizedSponsor(uint32 networkId, address sponsor) external view returns (bool) {
-    return _authorizedSponsors[networkId][sponsor];
+    // A terminally sealed network has no privileged sponsor class. The
+    // mapping is intentionally left in storage (it is not enumerable), but
+    // its entries become inert forever once the network is sealed.
+    return !networkSealed[networkId] && _authorizedSponsors[networkId][sponsor];
   }
 
   function setMintFee(uint32 networkId, uint256 fee) public onlyNetworkOwnerNotFeeLocked(networkId) {
@@ -683,6 +687,29 @@ contract CawNetworkManager {
   function lockNetworkOwnership(uint32 networkId) external onlyNetworkOwner(networkId) {
     networkOwnershipLocked[networkId] = true;
     emit NetworkOwnershipLocked(networkId);
+  }
+
+  /// @notice Permanently remove the network-owner control plane.
+  /// @dev This is stronger than the two legacy locks: it freezes fees and
+  ///      ownership, disables sponsor privilege through isAuthorizedSponsor,
+  ///      and clears ownerAddress so gas overrides and every other
+  ///      onlyNetworkOwner function become unreachable. It cannot be undone.
+  ///      Permissionless instance registration is unaffected.
+  function sealNetwork(uint32 networkId) external onlyNetworkOwner(networkId) {
+    require(!networkSealed[networkId], "Network sealed");
+
+    if (!networkFeesLocked[networkId]) {
+      networkFeesLocked[networkId] = true;
+      emit NetworkFeesLocked(networkId);
+    }
+    if (!networkOwnershipLocked[networkId]) {
+      networkOwnershipLocked[networkId] = true;
+      emit NetworkOwnershipLocked(networkId);
+    }
+
+    networkSealed[networkId] = true;
+    networks[networkId].ownerAddress = address(0);
+    emit NetworkSealed(networkId);
   }
 
   // ============================================
