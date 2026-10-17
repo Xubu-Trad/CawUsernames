@@ -21,42 +21,27 @@ export interface ActionCost {
   receive: bigint
 }
 
-export const ACTION_BASELINE_AND_CAP = {
-  CAW:    { baseline: 5000n,  ethCap: 500_000_000_000n },   // 5e11
-  LIKE:   { baseline: 2000n,  ethCap: 200_000_000_000n },   // 2e11
-  RECAW:  { baseline: 4000n,  ethCap: 400_000_000_000n },   // 4e11
-  FOLLOW: { baseline: 30000n, ethCap: 3_000_000_000_000n }, // 30e11
+export const ACTION_BASELINE = {
+  CAW:    5000n,
+  LIKE:   2000n,
+  RECAW:  4000n,
+  FOLLOW: 30000n,
 } as const
 
-export const CAP_STALE_THRESHOLD_SECONDS = 86400n // 24 hours (solidity/contracts/CawActions.sol:229)
-
 /**
- * Compute the effective action cost taking into account CawActions._getCost dynamic capping.
- * If capRatio == 0 or if the oracle sample is older than CAP_STALE_THRESHOLD (24h),
- * baseline manifesto costs apply.
- * Mirrors CawActions._getCost and CawActions._applyAction split logic.
+ * Return the fixed protocol action cost.
+ *
+ * The extra arguments are retained as optional compatibility parameters for
+ * callers that still have capState in memory. They intentionally have no
+ * effect: published action costs are immutable protocol constants.
  */
 export function getActionCost(
   typeName: FixedCostActionType,
-  capRatio: bigint = 0n,
-  lastUpdatedAt: bigint = 0n,
-  currentTimestampSeconds: bigint = 0n,
+  _capRatio: bigint = 0n,
+  _lastUpdatedAt: bigint = 0n,
+  _currentTimestampSeconds: bigint = 0n,
 ): ActionCost {
-  const spec = ACTION_BASELINE_AND_CAP[typeName]
-  let cost: bigint = spec.baseline
-
-  const isFresh =
-    capRatio > 0n &&
-    (lastUpdatedAt === 0n ||
-      currentTimestampSeconds === 0n ||
-      (currentTimestampSeconds >= lastUpdatedAt &&
-        currentTimestampSeconds - lastUpdatedAt <= CAP_STALE_THRESHOLD_SECONDS))
-
-  if (isFresh) {
-    let capped = ((spec.ethCap << 112n) / capRatio) / 10n**18n
-    if (capped === 0n) capped = 1n
-    if (capped < spec.baseline) cost = capped
-  }
+  const cost = ACTION_BASELINE[typeName]
 
   if (typeName === 'CAW') {
     return { spend: cost, communal: cost, receive: 0n }
