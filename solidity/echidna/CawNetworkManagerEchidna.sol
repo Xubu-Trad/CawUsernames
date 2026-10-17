@@ -31,6 +31,7 @@ contract CawNetworkManagerEchidna is CawNetworkManager {
     // Once-true latch flags (per-network) so we can assert monotonicity.
     mapping(uint32 => bool) internal sawFeesLocked;
     mapping(uint32 => bool) internal sawOwnershipLocked;
+    mapping(uint32 => bool) internal sawSealed;
 
     // Per-network, per-selector previously observed gas override (for ratcheting check).
     mapping(uint32 => mapping(bytes4 => uint128)) internal prevGasOverride;
@@ -90,6 +91,26 @@ contract CawNetworkManagerEchidna is CawNetworkManager {
         emit NetworkOwnershipLocked(id);
     }
 
+    function fuzzSealNetwork(uint32 idx) external {
+        if (createdIds.length == 0) return;
+        uint32 id = createdIds[idx % uint32(createdIds.length)];
+        if (networks[id].ownerAddress != msg.sender) return;
+        if (networkSealed[id]) return;
+
+        networkFeesLocked[id] = true;
+        networkOwnershipLocked[id] = true;
+        networkSealed[id] = true;
+        networks[id].ownerAddress = address(0);
+
+        sawFeesLocked[id] = true;
+        sawOwnershipLocked[id] = true;
+        sawSealed[id] = true;
+
+        emit NetworkFeesLocked(id);
+        emit NetworkOwnershipLocked(id);
+        emit NetworkSealed(id);
+    }
+
     function fuzzSetGasOverride(uint32 idx, bytes4 selector, uint128 newAmount) external {
         if (createdIds.length == 0) return;
         uint32 id = createdIds[idx % uint32(createdIds.length)];
@@ -141,14 +162,18 @@ contract CawNetworkManagerEchidna is CawNetworkManager {
         return true;
     }
 
-    /// @notice Every created network has a non-zero id, a non-zero owner, and a
-    ///         non-zero feeAddress (createNetwork enforced this; setFeeAddress
-    ///         and changeOwner reject zero too).
+    /// @notice Every created network has a non-zero id, feeAddress and
+    ///         storageChainEid. Unsealed networks have a non-zero owner;
+    ///         terminally sealed networks have ownerAddress == address(0).
     function echidna_network_invariants_hold() public view returns (bool) {
         for (uint i = 0; i < createdIds.length; i++) {
             uint32 id = createdIds[i];
             if (networks[id].id != id) return false;
-            if (networks[id].ownerAddress == address(0)) return false;
+            if (networkSealed[id]) {
+                if (networks[id].ownerAddress != address(0)) return false;
+            } else if (networks[id].ownerAddress == address(0)) {
+                return false;
+            }
             if (networks[id].feeAddress == address(0)) return false;
             if (networks[id].storageChainEid == 0) return false;
         }
@@ -171,6 +196,8 @@ contract CawNetworkManagerEchidna is CawNetworkManager {
             uint32 id = createdIds[i];
             if (sawFeesLocked[id] && !networkFeesLocked[id]) return false;
             if (sawOwnershipLocked[id] && !networkOwnershipLocked[id]) return false;
+            if (sawSealed[id] && !networkSealed[id]) return false;
+            if (networkSealed[id] && networks[id].ownerAddress != address(0)) return false;
         }
         return true;
     }
