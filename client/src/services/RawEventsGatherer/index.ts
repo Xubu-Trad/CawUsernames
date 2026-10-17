@@ -14,7 +14,7 @@ const Config = z.object({
   chainId:         z.number().int().positive(),
   rpcUrl:          z.string(), // Validated at runtime after env var substitution
   redisUrl:        z.string().optional().default('redis://127.0.0.1:6379'),
-  startBlock:      z.number().int().optional(), // Manual override — overrides creationBlock
+  startBlock:      z.number().int().nonnegative().optional(), // Storage-chain CawActions creation floor or explicit repair override
   networkId:        z.number().int().positive().optional(), // Defaults to CLIENT_ID env var
 })
 
@@ -226,35 +226,13 @@ export const rawEventsGathererService: Service = {
         }
       }
 
-      // Resolve the fresh-DB start block. Precedence, strongest to weakest:
-      //   1. cfg.startBlock — explicit override in config.json, for
-      //      backfill/repair or short-circuiting history.
-      //   2. Client.creationBlock in DB — canonical "this client was created
-      //      at block N" for the client we're indexing. Populated from
-      //      the CawNetworkManager's on-chain CawNetwork struct once the
-      //      struct carries that field (pending a redeploy). For now
-      //      seeded manually via `npx tsx scripts/seed-network-creation-block.ts`.
-      //   3. undefined — listenForRawEvents falls back to "current head",
-      //      which is the today-behavior for an unknown client.
-      //
-      // Once a RawEvent lands in the DB, getLastProcessedEvent takes over
-      // and this resolution is never used again. So it only matters on
-      // cold-start of a fresh DB.
-      let resolvedStartBlock: number | undefined = cfg.startBlock
-      if (resolvedStartBlock === undefined) {
-        try {
-          const client = await prisma.network.findUnique({
-            where: { id: networkId },
-            select: { creationBlock: true },
-          })
-          if (client?.creationBlock != null) {
-            resolvedStartBlock = Number(client.creationBlock)
-            console.log(`[RawEventsGatherer] Using Network.creationBlock=${resolvedStartBlock} for networkId=${networkId}`)
-          }
-        } catch (err: any) {
-          console.warn(`[RawEventsGatherer] Failed to read Network.creationBlock: ${err?.message}`)
-        }
-      }
+      // startBlock is a block number on the selected storage chain. Do not
+      // substitute Network.creationBlock here: CawNetworkManager records that
+      // value on L1, so interpreting it as a Base/Arbitrum block number mixes
+      // chain coordinate systems. The installer publishes the CawActions
+      // creation floor for the selected storage chain. On a fresh DB, the
+      // listener fails closed if that floor is absent.
+      const resolvedStartBlock = cfg.startBlock
 
       const listener = await listenForRawEvents({
         rpcUrl,
