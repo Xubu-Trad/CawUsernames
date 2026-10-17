@@ -294,6 +294,11 @@ export default async function listenForRawEvents(
     onStall?: (reason: string) => void
   }
 ): Promise<{ stop(): void }> {
+  // An event checkpoint alone does not establish that earlier history was read.
+  // Refuse to silently treat a partial database or the current head as genesis.
+  if (!Number.isSafeInteger(config.startBlock) || config.startBlock! < 0) {
+    throw new Error('RawEventsGatherer: a non-negative safe-integer history startBlock is required; configure the reviewed deployment floor before indexing')
+  }
   let wsProvider: WebSocketProvider | null = null
   let wsContract: Contract | null = null
   let isReconnecting = false
@@ -355,12 +360,8 @@ export default async function listenForRawEvents(
     } else {
       console.log(`[RawEventsGatherer] Starting from configured startBlock ${startBlock}`)
     }
-  } else if (last) {
-    startBlock = last.blockNumber
-    resumingFromLast = true
   } else {
-    startBlock = await httpProvider.getBlockNumber()
-    console.log(`[RawEventsGatherer] Fresh DB, no startBlock configured — starting from current block ${startBlock}`)
+    throw new Error('RawEventsGatherer: history startBlock is unavailable')
   }
   // parentHash chain seed: only trust `last`'s hash when we're actually
   // resuming from it (no configured floor pulling us earlier); otherwise the

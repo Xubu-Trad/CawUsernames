@@ -14,7 +14,7 @@ const Config = z.object({
   chainId:         z.number().int().positive(),
   rpcUrl:          z.string(), // Validated at runtime after env var substitution
   redisUrl:        z.string().optional().default('redis://127.0.0.1:6379'),
-  startBlock:      z.number().int().optional(), // Manual override — overrides creationBlock
+  startBlock:      z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(), // Manual override — overrides creationBlock
   networkId:        z.number().int().positive().optional(), // Defaults to CLIENT_ID env var
 })
 
@@ -234,12 +234,12 @@ export const rawEventsGathererService: Service = {
       //      the CawNetworkManager's on-chain CawNetwork struct once the
       //      struct carries that field (pending a redeploy). For now
       //      seeded manually via `npx tsx scripts/seed-network-creation-block.ts`.
-      //   3. undefined — listenForRawEvents falls back to "current head",
-      //      which is the today-behavior for an unknown client.
+      //   3. undefined — the listener rejects startup rather than assuming
+      //      the current head is a complete historical starting point.
       //
-      // Once a RawEvent lands in the DB, getLastProcessedEvent takes over
-      // and this resolution is never used again. So it only matters on
-      // cold-start of a fresh DB.
+      // A stored event alone does not prove earlier history was filled. The
+      // listener requires a floor on restart too, preserving its existing
+      // filled-history resume and configured-floor backfill behavior.
       let resolvedStartBlock: number | undefined = cfg.startBlock
       if (resolvedStartBlock === undefined) {
         try {
