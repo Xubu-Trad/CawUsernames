@@ -61,7 +61,7 @@
     "CawActionsERC1271_L1": "0x2418592Eb4bd5212b3c64408769f95F73dCb45c6",
     "CawProfileMinter": "0x5613353c6B6F55fBc82487D36a5316A2cAdE7Ee0"
   },
-  "l2DeployBlock": 45547765,
+  "l2DeployBlock": 45547482,
   "verification": {
     "CawFontDataA": {
       "verified": true,
@@ -233,5 +233,6 @@
       "ts": "2026-08-16T07:34:32.806Z",
       "message": "Pass - Verified"
     }
-  }
+  },
+  "l2DeployTxHash": "0xbc363f372442a6bde30a07d77c043d6d37bdd6dbd64cd30504a4a5d27bc19e26"
 }
