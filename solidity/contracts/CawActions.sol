@@ -1257,25 +1257,14 @@ contract CawActions {
     }
   }
 
-  /// @dev Helper: return pushed-ratio-capped cost, or baseline when cap is dormant.
-  ///      Single SLOAD reads both fields of CapState (one 256-bit slot).
-  ///      Zero capOracle (null-oracle deploy) also returns baseline — the capState
-  ///      slot is always zero in that case (setCapRatio is permanently unreachable).
-  ///      Bootstrap window: while block.timestamp < bootstrapExpiry and the
-  ///      oracle hasn't yet pushed a real ratio, use the deploy-time bootstrap
-  ///      ratio instead of the baseline. Both immutables = 0 disables this path.
-  function _getCost(uint256 baseline, uint256 ethCap) private view returns (uint256) {
-    CapState memory s = capState; // single SLOAD
-    uint256 ratio;
-    if (s.ratio != 0 && block.timestamp - s.lastUpdatedAt <= CAP_STALE_THRESHOLD) {
-      ratio = uint256(s.ratio);
-    } else if (block.timestamp < (_bootstrap >> 192)) {
-      ratio = uint192(_bootstrap);
-    }
-    if (ratio == 0) return baseline;
-    uint256 capped = (ethCap << 112) / ratio / 1e18;
-    if (capped == 0) capped = 1;
-    return capped < baseline ? capped : baseline;
+  /// @dev Return the published protocol cost unchanged.
+  ///
+  ///      CapState and the bootstrap fields remain in the ABI/storage layout for
+  ///      compatibility with already-deployed oracle tooling, but they no longer
+  ///      alter action economics. Validator-tip conversion uses the separate
+  ///      TipState path in _getTipCost and is unaffected.
+  function _getCost(uint256 baseline, uint256) private pure returns (uint256) {
+    return baseline;
   }
 
   /// @dev Apply a single already-authenticated action: protocol costs,
@@ -1300,11 +1289,9 @@ contract CawActions {
     if (action.text.length > 420) revert TextTooLong();
 
     // Fixed protocol costs per action type (in whole CAW tokens).
-    // When the cap oracle is configured and populated, each baseline is
-    // capped at `capOracle.capForAction(baseline, ethCap)`. The result is
-    // scaled proportionally across the sub-components (distribute / recipient)
-    // so economic ratios are preserved under the cap.
-    // Oracle == address(0): cap dormant, baselines apply unchanged.
+    // These are release invariants: oracle price state must not lower or raise
+    // them after deployment. _getCost keeps the call sites explicit while
+    // returning the published baseline unchanged.
     uint256 actionCost;
     if (action.actionType == ActionType.CAW) {
       uint256 cost = _getCost(5000, 5e11);
