@@ -2095,6 +2095,7 @@ class MultiChainDeployer {
       console.log(`   Gas: gasPrice=${ethers.formatUnits(gasOverrides.gasPrice, 'gwei')} gwei (${DEPLOY_GAS_MULTIPLIER}× multiplier)`);
     }
 
+    let indexedCreation = null;
     const contract = await this.retry(async () => {
       // Use higher gas limit for large contracts like CawProfile
       const overrides = { ...gasOverrides };
@@ -2102,9 +2103,27 @@ class MultiChainDeployer {
         overrides.gasLimit = 12000000n;
       }
       const deployed = await factory.deploy(...args, overrides);
-      console.log(`   Tx hash: ${deployed.deploymentTransaction().hash}`);
+      const deployTx = deployed.deploymentTransaction();
+      if (!deployTx) throw new Error(`Missing deployment transaction for ${contractKey}`);
+      console.log(`   Tx hash: ${deployTx.hash}`);
       console.log(`   Waiting for confirmation...`);
       await deployed.waitForDeployment();
+
+      // RawEventsGatherer watches CawActions/CawActionsERC1271. The first
+      // CawActions deployment block is therefore the deterministic lower
+      // bound for this generation. Record the receipt block here, at the
+      // transaction that actually created the watched contract — never a
+      // later chain-head sample taken after deployment phases complete.
+      if (contractKey === 'CawActions_L2') {
+        const receipt = await deployTx.wait();
+        if (!receipt || receipt.blockNumber == null) {
+          throw new Error('Missing CawActions_L2 deployment receipt block');
+        }
+        indexedCreation = {
+          blockNumber: Number(receipt.blockNumber),
+          transactionHash: deployTx.hash,
+        };
+      }
       return deployed;
     });
 
@@ -2113,6 +2132,11 @@ class MultiChainDeployer {
 
     this.state.addresses[contractKey] = address;
     this.contracts[contractKey] = contract;
+    if (indexedCreation) {
+      this.state.l2DeployBlock = indexedCreation.blockNumber;
+      this.state.l2DeployTxHash = indexedCreation.transactionHash;
+      console.log(`   Recorded CawActions_L2 creation block: ${indexedCreation.blockNumber}`);
+    }
     this.saveState();
 
     return address;
@@ -2471,20 +2495,9 @@ class MultiChainDeployer {
       await this.deployPhase(phase);
     }
 
-    // Record the L2 deploy block so RawEventsGatherer's startBlock can be
-    // updated post-deploy (mirrors the same step in redeploy()). Without
-    // this, a fresh `--reset` deploy left the indexer replaying from a
-    // stale startBlock that pre-dated the new contracts.
-    try {
-      const l2ChainKey = this.getChainKey('L2');
-      await this.initChain(l2ChainKey);
-      const currentBlock = await this.wallets[l2ChainKey].provider.getBlockNumber();
-      this.state.l2DeployBlock = currentBlock;
-      this.saveState();
-      console.log(`\n   Recorded L2 deploy block: ${currentBlock}`);
-    } catch (e) {
-      console.warn('   Could not record L2 deploy block:', e.message);
-    }
+    // l2DeployBlock is recorded at the CawActions_L2 deployment receipt
+    // inside deployContract(). Do not overwrite it with a later chain-head
+    // sample after the remaining phases have run.
   }
 
   async redeploy(contractKey) {
@@ -2683,28 +2696,10 @@ class MultiChainDeployer {
     // Redeploy by phase
     await this.deployAll();
 
-    // Record the L2 deployment block so RawEventsGatherer starts from the right place.
-    // Runs on any redeploy that touches an L2 contract whose events the indexer
-    // watches (CawActions, or any of its prerequisites). Previously only fired
-    // on a full CawProfile redeploy, which silently left `startBlock` stale when
-    // we redeployed just CawActions_L2 — the indexer then missed every action
-    // from the new contract until someone manually bumped `config.json`.
-    const l2IndexedContracts = [
-      'CawActions_L2', 'CawProfileLedger_L2', 'CawChallengeRelay_L2',
-    ];
-    const isL2Redeploy = isNameRedeploy || l2IndexedContracts.some(c => toRedeploy.has(c));
-    if (isL2Redeploy) {
-      try {
-        const l2ChainKey = this.getChainKey('L2');
-        await this.initChain(l2ChainKey);
-        const currentBlock = await this.wallets[l2ChainKey].provider.getBlockNumber();
-        this.state.l2DeployBlock = currentBlock;
-        this.saveState();
-        console.log(`\n   Recorded L2 deploy block: ${currentBlock}`);
-      } catch (e) {
-        console.warn('   Could not record L2 deploy block:', e.message);
-      }
-    }
+    // If this redeploy includes CawActions_L2, deployContract() has already
+    // replaced l2DeployBlock/l2DeployTxHash with that contract's receipt
+    // provenance. If it does not, preserve the existing floor; unrelated L2
+    // redeploys must not move the raw-event history floor forward.
   }
 
   printState() {
