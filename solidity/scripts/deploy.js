@@ -209,6 +209,21 @@ class FatalDeployError extends Error {
   }
 }
 
+// A non-zero one-shot slot is not sufficient evidence of correct wiring.
+// Preserve the development resume policy; sealed runs require the exact target.
+function bootstrapAddressAlreadySet(current, expected, label, deployer) {
+  const actual = current.toLowerCase();
+  if (deployer.finalizeBootstrapRequested !== true) {
+    return actual !== ethers.ZeroAddress.toLowerCase();
+  }
+  if (actual === ethers.ZeroAddress.toLowerCase()) return false;
+  if (actual === expected.toLowerCase()) return true;
+  throw new FatalDeployError(
+    `BOOTSTRAP WIRING MISMATCH: ${label}=${current}, expected ${expected}. ` +
+    'The one-shot slot cannot be repaired in place; abort and redeploy the affected cascade.'
+  );
+}
+
 // Chain configurations. Env vars are role-named (L1_RPC_URL, L2_RPC_URL,
 // L2B_RPC_URL, L2C_RPC_URL...) so the same names work across testnet/mainnet.
 const CHAINS = {
@@ -1055,6 +1070,7 @@ const LINKING_STEPS = [
     name: 'Wire CawProfile into CawNetworkManager (setCawProfile)',
     chain: 'L1',
     phase: 2,
+    sealedRequired: true,
     contract: 'CawNetworkManager',
     method: 'setCawProfile',
     args: (state) => [state.addresses.CawProfile],
@@ -1064,8 +1080,13 @@ const LINKING_STEPS = [
       if (!contract) return false;
       try {
         const current = await contract.cawProfile();
-        return current !== '0x0000000000000000000000000000000000000000';
-      } catch { return false; }
+        return bootstrapAddressAlreadySet(
+          current, state.addresses.CawProfile, 'CawNetworkManager.cawProfile', deployer
+        );
+      } catch (e) {
+        if (deployer.finalizeBootstrapRequested === true) throw e;
+        return false;
+      }
     },
   },
   {
@@ -1075,6 +1096,7 @@ const LINKING_STEPS = [
     name: 'Wire CawProfileMinter into CawNetworkManager (setMinter)',
     chain: 'L1',
     phase: 2,
+    sealedRequired: true,
     contract: 'CawNetworkManager',
     method: 'setMinter',
     args: (state) => [state.addresses.CawProfileMinter],
@@ -1084,8 +1106,13 @@ const LINKING_STEPS = [
       if (!contract) return false;
       try {
         const current = await contract.minter();
-        return current !== '0x0000000000000000000000000000000000000000';
-      } catch { return false; }
+        return bootstrapAddressAlreadySet(
+          current, state.addresses.CawProfileMinter, 'CawNetworkManager.minter', deployer
+        );
+      } catch (e) {
+        if (deployer.finalizeBootstrapRequested === true) throw e;
+        return false;
+      }
     },
   },
   // CawProfileURI is wired via the CawProfile constructor (immutable) — no setUriGenerator step.
@@ -1128,14 +1155,23 @@ const LINKING_STEPS = [
     name: 'Set CawProfile on BuyAndBurn',
     chain: 'L1',
     phase: 2,
+    sealedRequired: true,
     contract: 'CawBuyAndBurn',
     method: 'setCawProfile',
     args: (state) => [state.addresses.CawProfile],
     condition: (state) => state.addresses.CawBuyAndBurn && state.addresses.CawProfile,
     skipIf: async (state, deployer) => {
       const contract = deployer.getContract('CawBuyAndBurn');
-      const current = await contract.cawProfile();
-      return current !== '0x0000000000000000000000000000000000000000';
+      if (!contract) return false;
+      try {
+        const current = await contract.cawProfile();
+        return bootstrapAddressAlreadySet(
+          current, state.addresses.CawProfile, 'CawBuyAndBurn.cawProfile', deployer
+        );
+      } catch (e) {
+        if (deployer.finalizeBootstrapRequested === true) throw e;
+        return false;
+      }
     },
   },
   // Phase 3 + Phase 5 per-L2 linking is generated below from L2_CHAIN_KEYS.
@@ -1361,6 +1397,7 @@ for (const L of L2_CHAIN_KEYS) {
       name: `Set LZ peer on CawChallengeRelay_${L} (targets CawActionsArchive_${Lp})`,
       chain: L,
       phase: 5,
+      sealedRequired: true,
       contract: `CawChallengeRelay_${L}`,
       method: 'setPeer',
       args: (state, chainConfig) => [
@@ -1377,7 +1414,10 @@ for (const L of L2_CHAIN_KEYS) {
         try {
           const peer = await contract.peers(peerEid);
           return peer.toLowerCase() === expected.toLowerCase();
-        } catch { return false; }
+        } catch (e) {
+          if (deployer.finalizeBootstrapRequested === true) throw e;
+          return false;
+        }
       },
     });
 
@@ -1386,6 +1426,7 @@ for (const L of L2_CHAIN_KEYS) {
       name: `Set LZ peer on CawActionsArchive_${Lp} (accepts from CawChallengeRelay_${L})`,
       chain: Lp,
       phase: 5,
+      sealedRequired: true,
       contract: `CawActionsArchive_${Lp}`,
       method: 'setPeer',
       args: (state, chainConfig) => [
@@ -1402,7 +1443,10 @@ for (const L of L2_CHAIN_KEYS) {
         try {
           const peer = await contract.peers(peerEid);
           return peer.toLowerCase() === expected.toLowerCase();
-        } catch { return false; }
+        } catch (e) {
+          if (deployer.finalizeBootstrapRequested === true) throw e;
+          return false;
+        }
       },
     });
   }
@@ -1558,6 +1602,68 @@ for (const consumerKey of ['CawNetworkManager', 'CawBuyAndBurn']) {
       console.log(`   Assertion passed: ${consumerKey}.cawProfile()==CawProfile (${expected})`);
     },
   });
+}
+
+// =============================================================================
+// Sealed-generation read-backs run in the existing all-chain pre-finalizer
+// barrier. Re-read on every resume; saved linking flags are not proof of wiring.
+// These checks do not change the unsealed development lifecycle.
+// =============================================================================
+for (const consumerKey of ['CawNetworkManager', 'CawProfile']) {
+  LINKING_STEPS.push({
+    name: `Assert ${consumerKey}.minter == CawProfileMinter (sealed wiring read-back)`,
+    chain: 'L1',
+    phase: 7,
+    sealedRequired: true,
+    condition: (state, deployer) => deployer.finalizeBootstrapRequested === true &&
+      state.addresses[consumerKey] && state.addresses.CawProfileMinter,
+    custom: async (state, deployer) => {
+      const consumer = deployer.getContract(consumerKey);
+      if (!consumer) throw new FatalDeployError(`${consumerKey} handle missing — cannot verify minter`);
+      const actual = (await consumer.minter()).toLowerCase();
+      const expected = state.addresses.CawProfileMinter.toLowerCase();
+      if (actual !== expected) {
+        throw new FatalDeployError(
+          `MINTER WIRING MISMATCH: ${consumerKey}.minter()=${actual}, expected ${expected}. ` +
+          'Abort and redeploy the affected cascade before sealing.'
+        );
+      }
+    },
+  });
+}
+
+for (const storage of L2_CHAIN_KEYS) {
+  for (const archive of L2_CHAIN_KEYS) {
+    if (storage === archive) continue;
+    const relayKey = `CawChallengeRelay_${storage}`;
+    const archiveKey = `CawActionsArchive_${archive}`;
+    for (const [sourceKey, sourceChain, targetKey, targetChain] of [
+      [relayKey, storage, archiveKey, archive],
+      [archiveKey, archive, relayKey, storage],
+    ]) {
+      LINKING_STEPS.push({
+        name: `Assert ${sourceKey}.peers(${targetChain}) == ${targetKey} (sealed mesh read-back)`,
+        chain: sourceChain,
+        phase: 7,
+        sealedRequired: true,
+        condition: (state, deployer) => deployer.finalizeBootstrapRequested === true &&
+          state.addresses[sourceKey] && state.addresses[targetKey],
+        custom: async (state, deployer) => {
+          const source = deployer.getContract(sourceKey);
+          if (!source) throw new FatalDeployError(`${sourceKey} handle missing — cannot verify mesh peer`);
+          const eid = CHAINS[deployer.getChainKey(targetChain)].lzEid;
+          const expected = ethers.zeroPadValue(state.addresses[targetKey], 32).toLowerCase();
+          const actual = (await source.peers(eid)).toLowerCase();
+          if (actual !== expected) {
+            throw new FatalDeployError(
+              `ARCHIVE/RELAY PEER MISMATCH: ${sourceKey}.peers(${eid})=${actual}, expected ${expected}. ` +
+              'Abort and redeploy the affected cascade before sealing.'
+            );
+          }
+        },
+      });
+    }
+  }
 }
 
 // =============================================================================
@@ -2344,6 +2450,12 @@ class MultiChainDeployer {
           return;
         }
       } catch (e) {
+        if (e instanceof FatalDeployError) throw e;
+        if (this.isSealedRequiredStep(step)) {
+          throw new FatalDeployError(
+            `Required sealed deployment skip check failed: ${step.name}: ${e.message}`
+          );
+        }
         console.log(`   Skip check failed: ${e.message}, proceeding...`);
       }
     }
