@@ -1658,7 +1658,7 @@ LINKING_STEPS.push({
 // Each L2 in L2_CHAIN_KEYS contains the four per-chain roles. Empty strings
 // for not-yet-deployed contracts so the manifest stays well-formed.
 
-function buildDeploymentsBlock(env, addresses) {
+function buildDeploymentsBlock(env, addresses, cawActionsDeployments = {}) {
   const lines = [`  ${env}: {`];
 
   // ----- L1 (always present) -----
@@ -1683,6 +1683,9 @@ function buildDeploymentsBlock(env, addresses) {
   for (const [name, addr] of Object.entries(l1)) {
     if (addr) lines.push(`      ${name}: '${addr}',`);
   }
+  const l1Creation = cawActionsDeployments.L1;
+  if (l1Creation?.blockNumber) lines.push(`      CawActionsCreationBlock: ${l1Creation.blockNumber},`);
+  if (l1Creation?.transactionHash) lines.push(`      CawActionsDeploymentTx: '${l1Creation.transactionHash}',`);
   lines.push('    },');
 
   // ----- Each L2 -----
@@ -1701,6 +1704,9 @@ function buildDeploymentsBlock(env, addresses) {
     for (const [name, addr] of Object.entries(block)) {
       if (addr) lines.push(`      ${name}: '${addr}',`);
     }
+    const creation = cawActionsDeployments[L];
+    if (creation?.blockNumber) lines.push(`      CawActionsCreationBlock: ${creation.blockNumber},`);
+    if (creation?.transactionHash) lines.push(`      CawActionsDeploymentTx: '${creation.transactionHash}',`);
     lines.push('    },');
   }
 
@@ -2109,17 +2115,18 @@ class MultiChainDeployer {
       console.log(`   Waiting for confirmation...`);
       await deployed.waitForDeployment();
 
-      // RawEventsGatherer watches CawActions/CawActionsERC1271. The first
-      // CawActions deployment block is therefore the deterministic lower
-      // bound for this generation. Record the receipt block here, at the
-      // transaction that actually created the watched contract — never a
-      // later chain-head sample taken after deployment phases complete.
-      if (contractKey === 'CawActions_L2') {
+      // RawEventsGatherer may index CawActions on L1, L2, or L2b depending
+      // on the selected Network storage chain. Capture creation provenance
+      // for every CawActions deployment at the transaction that created it.
+      // A later chain-head sample is not a historical replay boundary.
+      const indexedMatch = /^CawActions_(L1|L2b?)$/.exec(contractKey);
+      if (indexedMatch) {
         const receipt = await deployTx.wait();
         if (!receipt || receipt.blockNumber == null) {
-          throw new Error('Missing CawActions_L2 deployment receipt block');
+          throw new Error(`Missing ${contractKey} deployment receipt block`);
         }
         indexedCreation = {
+          chainKey: indexedMatch[1],
           blockNumber: Number(receipt.blockNumber),
           transactionHash: deployTx.hash,
         };
@@ -2133,9 +2140,17 @@ class MultiChainDeployer {
     this.state.addresses[contractKey] = address;
     this.contracts[contractKey] = contract;
     if (indexedCreation) {
-      this.state.l2DeployBlock = indexedCreation.blockNumber;
-      this.state.l2DeployTxHash = indexedCreation.transactionHash;
-      console.log(`   Recorded CawActions_L2 creation block: ${indexedCreation.blockNumber}`);
+      this.state.cawActionsDeployments = this.state.cawActionsDeployments || {};
+      this.state.cawActionsDeployments[indexedCreation.chainKey] = {
+        blockNumber: indexedCreation.blockNumber,
+        transactionHash: indexedCreation.transactionHash,
+      };
+      // Backward-compatible aliases while older installer code is phased out.
+      if (indexedCreation.chainKey === 'L2') {
+        this.state.l2DeployBlock = indexedCreation.blockNumber;
+        this.state.l2DeployTxHash = indexedCreation.transactionHash;
+      }
+      console.log(`   Recorded CawActions_${indexedCreation.chainKey} creation block: ${indexedCreation.blockNumber}`);
     }
     this.saveState();
 
@@ -3024,7 +3039,11 @@ After deployment, ABIs are automatically regenerated for the frontend.
     // addresses.ts. deploy.js never touches addresses.ts directly anymore.
     const deploymentsFile = path.join(__dirname, '../../client/src/abi/deployments.ts');
     try {
-      const newBlock = buildDeploymentsBlock(deployer.env, deployer.state.addresses);
+      const newBlock = buildDeploymentsBlock(
+        deployer.env,
+        deployer.state.addresses,
+        deployer.state.cawActionsDeployments || {}
+      );
       let content = fs.readFileSync(deploymentsFile, 'utf8');
       // Match the entire `<env>: { ... },` block (the closing `},` at the
       // env-level indent) and replace it. Anchored at the env name so other
