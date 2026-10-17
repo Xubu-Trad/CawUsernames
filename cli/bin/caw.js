@@ -606,6 +606,7 @@ program
       const config = {
         network: env.NETWORK || 'testnet',
         networkId: Number(env.NETWORK_ID || 1),
+        l2ChainId: Number(env.L2_CHAIN_ID) || undefined,
         l1RpcUrl: env.L1_RPC_URL,
         l1RpcUrlHttp: env.L1_RPC_URL_HTTP,
       }
@@ -654,6 +655,7 @@ program
       const config = {
         network: env.NETWORK || 'testnet',
         networkId: Number(env.NETWORK_ID || 1),
+        l2ChainId: Number(env.L2_CHAIN_ID) || undefined,
         domain: (env.HOST_DOMAIN || env.SHORTURL_DOMAIN)?.replace(/^https?:\/\//, ''),
         apiPort: Number(env.PORT) || 4000,
         redisUrl: env.REDIS_URL,
