@@ -129,11 +129,11 @@ function driftFixture(missingNames){
  const g=generator();const config={network:'testnet',networkId:1};
  const installed=g.api.buildServiceList('full',config).filter(s=>!missingNames.includes(s.service));
  const scanner=installed.find(s=>s.service==='RawEventsGatherer');if(scanner)scanner.config={chainId:421614,startBlock:123};
- let writes=0,output;const ctx={path,buildServiceList:g.api.buildServiceList,console:{log(){}},success:x=>x,warn:x=>x,dim:x=>x,brand:x=>x,
+ let writes=0,output;const logs=[];const ctx={path,buildServiceList:g.api.buildServiceList,console:{log:x=>logs.push(x)},success:x=>x,warn:x=>x,dim:x=>x,brand:x=>x,
  fs:{existsSync:()=>true,readFileSync:p=>p.endsWith('.env')?'L1_CHAIN_ID=11155111\nNETWORK_ID=1\n':JSON.stringify(installed),writeFileSync:(_p,s)=>{writes++;output=JSON.parse(s);}}};
  const src=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/serviceDrift.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
  vm.createContext(ctx);vm.runInContext(src+'\nglobalThis.report=reportServiceDrift;',ctx);
- return {run:fix=>ctx.report('/synthetic',{fix}),writes:()=>writes,output:()=>output};
+ return {run:fix=>ctx.report('/synthetic',{fix}),writes:()=>writes,output:()=>output,logs};
 }
 test('doctor fix refuses missing scanner before any config writes',()=>{
  const f=driftFixture(['RawEventsGatherer','DepositWatcher']);const result=f.run(true);
@@ -202,4 +202,11 @@ test('actual install command awaits successful configuration before later stages
  const f=installCommandFixture(async()=>{entered();await barrier;});const running=f.run();await ready;
  assert.deepEqual(f.calls,['generate']);release();await running;
  assert.deepEqual(f.calls,['generate','dependencies','nginx','media','start']);assert.ok(f.sections.includes('Setup Complete!'));
+});
+
+test('readonly doctor requires verified history without offering an unsafe scanner template',()=>{
+ const f=driftFixture(['RawEventsGatherer','DepositWatcher']);const result=f.run(false);
+ assert.equal(result.fixed,false);assert.equal(result.reason,'verified history required');assert.equal(f.writes(),0);
+ assert.match(f.logs.join('\n'),/receipt-verified installer/);
+ assert.doesNotMatch(f.logs.join('\n'),/doctor --fix|"chainId"|"startBlock"/);
 });
