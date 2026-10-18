@@ -71,3 +71,10 @@ The first result is critical: matching runtime alone cannot authenticate a stora
 This fixture installs synthetic response bytecode and storage through Anvil test methods; it does not deploy CAW or LayerZero contracts. All three role providers use one unforked local chain. It covers the unsealed testnet path only; finalization and mainnet library pinning are skipped by that path. Run with a fresh Anvil at localhost:18672 and the verified ethers UMD path as the first argument. The actual local run retained resource guards and stopped Anvil afterward.
 
 During fixture development, the initial address range collided with a reserved precompile and returned empty ABI data; fixture addresses were moved out of that range. A subsequent console encoding problem was corrected by limiting the result output to summaries. The final guarded run passed. These were fixture failures, not protocol findings.
+
+
+### Complete sealed verifier with actual finalization receipts
+
+`wiring-sealed-live.cjs` deploys and finalizes three actual compiled PathwayExpanders on fresh local Anvil, then runs the complete verifier. Matching state: 79 passed, 0 failed. Replacing each role's finalization metadata with an unrelated successful transfer yields 74 passed, 4 failed for each of L1, L2 and L2b. Four runs perform 184 eth_call requests.
+
+Other contracts remain synthetic EVM response fixtures; all roles share one local chain. This exercises the sealed testnet path, not mainnet library pinning, real endpoint behavior or actual cross-chain delivery. Run with the verified ethers UMD path and the compiler output from `integration-solc-input.json` as arguments, using a fresh Anvil at localhost:18672. Existing resource guards were retained; Anvil stopped afterward.
