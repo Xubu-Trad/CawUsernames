@@ -104,3 +104,11 @@ production `publishConfigOutputs` now rejects Windows before any snapshot reads,
 100 regressions pass. two added checks verify rejection before any filesystem operation and preservation of existing targets. nine transport/generation cases pass, but the valid-history Windows case now expects publication refusal with no output files; it is not successful Windows installation evidence. the internal staging tests still run against synthetic files to exercise algorithm behavior, separately from supported production behavior.
 
 the protected-ACL fixture was rerun with the guarded production function: expected refusal, identical file hash, identical security descriptor and protected inheritance still true. only a synthetic file was used. POSIX ownership/extended ACL preservation, crash recovery, writer exclusion and rollback remain unresolved; non-Windows acceptance is not proof of those properties. standalone address regeneration is outside this staged-publication path and its behavior is unchanged.
+
+## Linux extended-ACL primitive check — not Node integration
+
+a disposable Linux-native synthetic file was assigned an extended access ACL with a named-user entry. a Python check then created a same-directory file exclusively, wrote/synced synthetic content, copied mode bits and replaced the destination. limits:512MiB address space, one process and30CPU seconds; startup memory threshold passed.
+
+mode remained0640; uid and gid were unchanged. `system.posix_acl_access` was present before replacement and absent afterward. this demonstrates that copying mode bits alone does not preserve extended access ACLs for the tested filesystem operation. it is not an execution of publishConfigOutputs, proof about every Linux filesystem, or evidence of changed owner/group. no real configuration was modified.
+
+the actual Node/systemd test could not start: the user bus was absent and the available private manager socket rejected transient service requests. resource limits were not removed to obtain a result. native Node integration remains pending. staging must not be considered permission-safe on POSIX from mode/owner equality alone; extended-ACL handling still needs preservation or a validated fail-before-write restriction.
