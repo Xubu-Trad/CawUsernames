@@ -9,15 +9,20 @@ both locks can be set while the same owner retains these powers:
 | fee setters, fee recipient, fee ceilings, tip target/ceiling | onlyNetworkOwnerNotFeeLocked | blocked |
 | changeOwner | onlyNetworkOwnerNotOwnershipLocked | blocked; zero-address transfer is also rejected |
 | addAuthorizedSponsor / removeAuthorizedSponsor | onlyNetworkOwner | still callable; changes deposit-fee exemptions |
+| CawProfile.withdrawFeesFor | ownerAddress check in CawProfile | still callable; owner chooses when to trigger the fee swap and minCawOut; output goes to feeAddress, not necessarily the owner |
 | setGasOverride | onlyNetworkOwner | still callable; strictly increases the per-selector override up to MAX_GAS_OVERRIDE |
 
-`onlyNetworkOwner` checks ownerAddress against msg.sender and does not check either lock. the lock functions set flags; neither clears ownerAddress. this is source evidence of retained per-network control, not a claim about any current deployment's state. PathwayExpander finalization is a separate authority boundary.
+`onlyNetworkOwner` checks ownerAddress against msg.sender and does not check either lock. the lock functions set flags; neither clears ownerAddress. this is source evidence of retained per-network control, not a claim about any current deployment's state. On this baseline, PathwayExpander documents `renounceOwnership()` as ending its additions-only authority. The finalization changes proposed in PR #221 are separate; they are not part of this baseline or this PR.
 
 ## terminal-state decisions still needed
 
-- existing sponsor exemptions cannot simply be frozen without considering compromised sponsor keys. decide whether a terminal state disables exemptions, permits their continuation, or uses a separately agreed mechanism. the nested mapping is not an enumerable sponsor list.
+- existing sponsor exemptions cannot simply be frozen without considering compromised sponsor keys. decide whether a terminal state disables exemptions, permits their continuation, or uses a separately agreed mechanism. the nested mapping is not enumerable on-chain. its current entries can be reconstructed off-chain from complete, correctly ordered `AuthorizedSponsorSet` add/remove logs, subject to chain history availability and reorg handling; that does not make on-chain enumeration available.
 - freezing gas overrides removes the current cross-chain recovery mechanism. making increases permissionless would let anyone raise costs to the cap. neither choice follows automatically from locking ownership.
-- fee recipient and accrued fees are separate from owner authority. removing control does not by itself settle distribution policy or erase existing claims.
+- fee entitlement and swap-trigger authority are distinct. `CawProfile.withdrawFeesFor` checks only the network owner and forwards the owner-selected `minCawOut` to `_withdrawFees`, even after both locks. `_withdrawFees` consumes fees accrued by feeAddress and a matching amount up to the available protocol pool, then calls `swapAndSplit`. the feeAddress can independently use `withdrawFees`. removing owner authority must address the delegated trigger without erasing the recipient's existing claim or silently changing distribution policy.
 - define the terminal-state event and readback, and require tests that every affected owner entry point rejects after finalization while permissionless operations and user exits still work.
 
 this change corrects the renounce-equivalent description only. it does not add a terminal state, change runtime behavior, settle economics, or establish manifesto compliance. a behavioral patch needs explicit sponsor/gas policy and corresponding regression coverage.
+
+## independent review record
+
+[tentencaw reviewed head 213af9b6](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6255525806) and reports seven passing authority tests on master and that head, plus comparisons of 277 compiled artifacts after masking Solidity metadata. these are reviewer-reported results, not independently rerun here. source inspection confirms the additional withdrawFeesFor path and the sponsor event writes. reproduction source and exact build commands are requested so others can repeat the checks.
