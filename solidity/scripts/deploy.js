@@ -1129,6 +1129,7 @@ const LINKING_STEPS = [
     name: 'Assert CawCapOracle_L1.cawActions == CawActions_L1 (nonce-prediction check)',
     chain: 'L1',
     phase: 2,
+    sealedRequired: true,
     custom: async (state, deployer) => {
       const oracleAddr = state.addresses.CawCapOracle_L1;
       const actionsAddr = state.addresses.CawActions_L1;
@@ -1314,6 +1315,7 @@ for (const L of L2_CHAIN_KEYS) {
     name: `Assert CawProfileLedger_${L}.cawActions == CawActions_${L} (nonce-prediction check)`,
     chain: L,
     phase: 1,
+    sealedRequired: true,
     custom: async (state, deployer) => {
       const ledgerAddr = state.addresses[`CawProfileLedger_${L}`];
       const actionsAddr = state.addresses[`CawActions_${L}`];
@@ -1667,6 +1669,43 @@ for (const storage of L2_CHAIN_KEYS) {
 }
 
 // =============================================================================
+// Re-read all constructor bindings at the generation barrier, including L1.
+// Earlier checks are not enough on resume, and missing siblings must not skip.
+for (const chain of ['L1', ...L2_CHAIN_KEYS]) {
+  LINKING_STEPS.push({
+    name: `Assert ${chain} constructor bindings (sealed constructor read-back)`,
+    chain,
+    phase: 7,
+    sealedRequired: true,
+    custom: async (state, deployer) => {
+      if (deployer.finalizeBootstrapRequested !== true) return;
+      const ledgerKey = `CawProfileLedger_${chain}`;
+      const oracleKey = `CawCapOracle_${chain}`;
+      const actionsKey = `CawActions_${chain}`;
+      const siblingKey = `CawActionsERC1271_${chain}`;
+      for (const key of [ledgerKey, oracleKey, actionsKey, siblingKey]) {
+        if (!state.addresses[key] || state.addresses[key] === ethers.ZeroAddress) {
+          throw new Error(`Required constructor binding address missing: ${key}`);
+        }
+      }
+      for (const [key, getter, target] of [
+        [ledgerKey, 'cawActions', actionsKey],
+        [ledgerKey, 'capOracle', oracleKey],
+        [ledgerKey, 'erc1271Sibling', siblingKey],
+        [oracleKey, 'cawActions', actionsKey],
+      ]) {
+        const contract = deployer.getContract(key);
+        if (!contract) throw new Error(`Required constructor binding handle missing: ${key}`);
+        const actual = (await contract[getter]()).toLowerCase();
+        const expected = state.addresses[target].toLowerCase();
+        if (actual !== expected) {
+          throw new Error(`CONSTRUCTOR BINDING MISMATCH: ${key}.${getter}=${actual}, expected ${expected}`);
+        }
+      }
+    },
+  });
+}
+
 // Phase 7 sealed-generation final step — close PathwayExpander bootstrap owner.
 // Mainnet always executes this step. Non-mainnet executes it only when
 // FINALIZE_BOOTSTRAP=true/1 was explicitly requested.

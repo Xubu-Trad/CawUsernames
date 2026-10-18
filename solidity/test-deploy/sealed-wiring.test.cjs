@@ -13,6 +13,56 @@ const address = n => '0x' + n.toString(16).padStart(40, '0');
 const padded = value => '0x' + value.slice(2).padStart(64, '0');
 const deny = () => { throw new Error('External I/O is disabled in this test'); };
 
+for (const chain of ['L1', ...load().L2_CHAIN_KEYS]) {
+  for (const [kind, getter] of [['CawProfileLedger', 'cawActions'], ['CawProfileLedger', 'capOracle'],
+    ['CawProfileLedger', 'erc1271Sibling'], ['CawCapOracle', 'cawActions']]) {
+    for (const failure of ['read', 'mismatch', 'handle']) {
+      test(`constructor ${chain} ${kind}.${getter} ${failure} blocks every finalizer`, async () => {
+        const f = fixture();
+        assert.ok(chain === 'L1' || f.api.L2_CHAIN_KEYS.includes(chain));
+        const key = `${kind}_${chain}`;
+        if (failure === 'handle') delete f.contracts[key];
+        else f.fault.set(`${key}:${getter}`, () => {
+          if (failure === 'read') throw new Error('RPC unavailable');
+          return address(999);
+        });
+        await assert.rejects(f.d.deployPhase(7), error => error.name === 'FatalDeployError');
+        assert.equal(f.seals().length, 0);
+      });
+    }
+  }
+  for (const kind of ['CawProfileLedger', 'CawCapOracle', 'CawActions', 'CawActionsERC1271']) {
+    test(`constructor missing ${kind}_${chain} blocks every finalizer`, async () => {
+      const f = fixture();
+      delete f.d.state.addresses[`${kind}_${chain}`];
+      await assert.rejects(f.d.deployPhase(7), error => error.name === 'FatalDeployError');
+      assert.equal(f.seals().length, 0);
+    });
+  }
+}
+
+test('constructor earlier nonce read failure aborts sealed generation', async () => {
+  const f = fixture();
+  const step = f.api.LINKING_STEPS.find(s => s.chain === 'L2' && /nonce-prediction check/.test(s.name));
+  f.fault.set('CawProfileLedger_L2:cawActions', () => { throw new Error('RPC unavailable'); });
+  const execute = f.d.executeLink;
+  f.d.executeLink = item => item === step || item.phase === 7 ? execute.call(f.d, item) : Promise.resolve();
+  await assert.rejects(async () => { await f.d.deployPhase(1); await f.d.deployPhase(7); }, error => error.name === 'FatalDeployError');
+  assert.equal(f.seals().length, 0);
+});
+
+test('constructor checks do not read bindings in unsealed development', async () => {
+  const f = fixture(false);
+  for (const key of f.slots.keys()) {
+    if (/:cawActions$|:capOracle$|:erc1271Sibling$/.test(key)) {
+      f.fault.set(key, () => assert.fail('unsealed binding read'));
+    }
+  }
+  await f.d.deployPhase(7);
+  assert.equal(f.seals().length, 0);
+  assert.equal(f.events.filter(e => /:cawActions$|:capOracle$|:erc1271Sibling$/.test(e)).length, 0);
+});
+
 function load() {
   const scripts = path.resolve(__dirname, '../scripts');
   const file = process.env.CAW_DEPLOY_TEST_SOURCE || path.join(scripts, 'deploy.js');
@@ -72,6 +122,9 @@ function fixture(sealed = true) {
   };
   for (const key of Object.keys(addresses)) {
     contracts[key] = {
+      cawActions: () => read(`${key}:cawActions`),
+      capOracle: () => read(`${key}:capOracle`),
+      erc1271Sibling: () => read(`${key}:erc1271Sibling`),
       cawProfile: () => read(`${key}:cawProfile`),
       minter: () => read(`${key}:minter`),
       peers: eid => read(`${key}:peers:${eid}`),
@@ -89,6 +142,12 @@ function fixture(sealed = true) {
   for (const key of ['CawNetworkManager', 'CawBuyAndBurn']) slots.set(`${key}:cawProfile`, addresses.CawProfile);
   for (const key of ['CawNetworkManager', 'CawProfile']) slots.set(`${key}:minter`, addresses.CawProfileMinter);
   for (const chain of ['L1', ...api.L2_CHAIN_KEYS]) slots.set(`PathwayExpander_${chain}:owner`, address(999));
+  for (const chain of ['L1', ...api.L2_CHAIN_KEYS]) {
+    slots.set(`CawProfileLedger_${chain}:cawActions`, addresses[`CawActions_${chain}`]);
+    slots.set(`CawProfileLedger_${chain}:capOracle`, addresses[`CawCapOracle_${chain}`]);
+    slots.set(`CawProfileLedger_${chain}:erc1271Sibling`, addresses[`CawActionsERC1271_${chain}`]);
+    slots.set(`CawCapOracle_${chain}:cawActions`, addresses[`CawActions_${chain}`]);
+  }
   for (const chain of api.L2_CHAIN_KEYS) {
     slots.set(`CawProfileLedger_${chain}:peers:${api.CHAINS.testnetL1.lzEid}`, padded(addresses.CawProfile));
     slots.set(`CawProfile:peers:${api.CHAINS['testnet' + chain].lzEid}`, padded(addresses[`CawProfileLedger_${chain}`]));

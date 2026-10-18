@@ -23,3 +23,13 @@ The suite checks:
 The added checks apply when sealing is requested. They establish agreement between returned contract state and this deployment's expected addresses. They do not authenticate an RPC server, validate deployed bytecode, provide cross-chain atomicity, or prove that all remaining protocol requirements are satisfied. A later finalizer can still fail after another chain has sealed; recovery must preserve the existing monotonic sealing policy.
 
 These are deployment-runner regressions, not Solidity/EVM tests or a full multi-chain deployment. Existing finalization proof validation remains separate in `scripts/verify-deploy-wiring.js`. LayerZero library configuration, KYC policy/registration, Network economics, and permissionless future expansion need their own review and integration checks.
+# constructor-binding regression
+
+the suite also exercises L1 and every configured L2 ledger's cawActions,
+capOracle and erc1271Sibling bindings, plus each cap oracle's cawActions.
+missing addresses/handles, failed reads and mismatches must stop the sealed
+Phase 7 before any finalizer. earlier nonce assertions are required when
+sealing; the final barrier re-reads constructor bindings on resume.
+unsealed development remains a separate path. these are mocked runner tests,
+not live-chain deployment evidence.
+
