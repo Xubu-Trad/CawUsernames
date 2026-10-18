@@ -3076,22 +3076,28 @@ After deployment, ABIs are automatically regenerated for the frontend.
 
     // Resolve each local indexer's chain independently. Never copy the L2
     // compatibility floor onto an L2b/L1 indexer or infer an unknown floor.
-    const configFile = path.join(__dirname, '../../client/config.json');
-    if (fs.existsSync(configFile)) {
-      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-      let changed = false;
-      for (const gatherer of config.filter(s => s.service === 'RawEventsGatherer')) {
-        const floor = indexedCreationFloor(
-          deployer.state, CONTRACTS, CHAINS, deployer.env, gatherer.config.chainId
-        );
-        if (floor === undefined) {
-          console.warn(`No receipt-derived history floor for indexer chain ${gatherer.config.chainId}; config unchanged.`);
-          continue;
+    try {
+      const configFile = path.join(__dirname, '../../client/config.json');
+      if (fs.existsSync(configFile)) {
+        const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+        let changed = false;
+        for (const gatherer of config.filter(s => s.service === 'RawEventsGatherer')) {
+          const floor = indexedCreationFloor(
+            deployer.state, CONTRACTS, CHAINS, deployer.env, gatherer.config.chainId
+          );
+          if (floor === undefined) {
+            console.warn(`No receipt-derived history floor for indexer chain ${gatherer.config.chainId}; config unchanged.`);
+            continue;
+          }
+          gatherer.config.startBlock = floor;
+          changed = true;
         }
-        gatherer.config.startBlock = floor;
-        changed = true;
+        if (changed) fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
       }
-      if (changed) fs.writeFileSync(configFile, JSON.stringify(config, null, 2) + '\n');
+    } catch (e) {
+      // Local config is optional; do not prevent addresses/ABI output.
+      // Avoid logging file contents or provider details from error messages.
+      console.warn('Failed to update local indexer config; config unchanged or write incomplete. Review client/config.json before starting the indexer.');
     }
 
     // Rewrite this install's per-network addresses.ts. The CLI's install step

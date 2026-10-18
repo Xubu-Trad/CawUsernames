@@ -233,3 +233,36 @@ for (const field of ['blockNumber', 'blockHash', 'transactionIndex']) {
       'CawActions_L2', address, chainId), /no longer matches/);
   });
 }
+
+// Execute the actual local-config update block and the continuation after it.
+function configUpdate(mode) {
+  const source = fs.readFileSync(path.join(__dirname, '../scripts/deploy.js'), 'utf8');
+  const start = source.indexOf('    // Resolve each local indexer');
+  const end = source.indexOf("    // Rewrite this install's per-network addresses.ts.", start);
+  assert.ok(start >= 0 && end > start);
+  const writes = [], warnings = [];
+  const rows = [{ service: 'RawEventsGatherer', config: { chainId, startBlock: 999 } }];
+  const context = { __dirname: '/synthetic/scripts', path,
+    deployer: { state: {}, env: 'testnet' }, CONTRACTS: {}, CHAINS: {},
+    indexedCreationFloor: () => mode === 'unknown' ? undefined : 100,
+    console: { warn: x => warnings.push(x) },
+    fs: { existsSync: () => mode !== 'missing',
+      readFileSync: () => mode === 'malformed' ? '{' : mode === 'wrong-shape' ? '{}' : JSON.stringify(rows),
+      writeFileSync: (_file, data) => { if (mode === 'write-error') throw Error('sensitive local detail'); writes.push(JSON.parse(data)); } },
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end) + '\nglobalThis.continued = true;', context);
+  assert.equal(context.continued, true);
+  return { writes, warnings };
+}
+for (const mode of ['malformed', 'wrong-shape', 'write-error']) {
+  test(`local config ${mode} preserves later output execution`, () => {
+    const r = configUpdate(mode); assert.equal(r.writes.length, 0); assert.equal(r.warnings.length, 1);
+    assert.ok(!r.warnings[0].includes('sensitive local detail'));
+  });
+}
+test('local config updates a known floor and leaves missing or unknown config alone', () => {
+  assert.equal(configUpdate('valid').writes[0][0].config.startBlock, 100);
+  assert.equal(configUpdate('missing').writes.length, 0);
+  assert.equal(configUpdate('unknown').writes.length, 0);
+});
