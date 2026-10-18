@@ -22,7 +22,18 @@ async function rpc(method,params){
  }
  const router=await deploy(output.contracts['test-deploy/BindingRouter.sol'].BindingRouter.evm.bytecode.object);
  const args=ethers.AbiCoder.defaultAbiCoder().encode(['address','address','address','address'],[token,profile,router.contractAddress,owner]).slice(2);
+ const init='0x'+minter.evm.bytecode.object+args;
+ const priorBlock=await rpc('eth_blockNumber',[]);
+ const nonce=await rpc('eth_getTransactionCount',[owner,priorBlock]);
+ const predicted=ethers.getCreateAddress({from:owner,nonce:BigInt(nonce)});
+ const replayRuntime=await rpc('eth_call',[{from:owner,data:init,gas:'0xe4e1c0'},priorBlock]);
  const receipt=await deploy(minter.evm.bytecode.object,args);
+ assert.equal(receipt.contractAddress.toLowerCase(),predicted.toLowerCase());
+ const creation=await rpc('eth_getTransactionByHash',[receipt.transactionHash]);
+ assert.equal(creation.to,null);assert.equal(creation.from.toLowerCase(),owner.toLowerCase());
+ assert.equal(creation.input.toLowerCase(),init.toLowerCase());
+ const runtime=await rpc('eth_getCode',[receipt.contractAddress,receipt.blockNumber]);
+ assert.ok(runtime.length>2);assert.equal(runtime,replayRuntime,'constructor replay runtime mismatch');
  const word=await rpc('eth_getStorageAt',[receipt.contractAddress,ethers.toQuantity(BigInt(field.slot)),receipt.blockNumber]);
  const actual=ethers.getAddress('0x'+word.slice(-40));
  assert.equal(actual.toLowerCase(),profile.toLowerCase());
@@ -31,5 +42,5 @@ async function rpc(method,params){
  await assert.rejects(()=>rpc('eth_call',[{to:receipt.contractAddress,data:selector},receipt.blockNumber]));
  const authorityData=await rpc('eth_call',[{to:receipt.contractAddress,data:ethers.id('pathwayExpander()').slice(0,10)},receipt.blockNumber]);
  assert.equal(ethers.AbiCoder.defaultAbiCoder().decode(['address'],authorityData)[0].toLowerCase(),owner.toLowerCase());
- console.log(JSON.stringify({scope:'actual minter on fresh local Anvil, synthetic router and account addresses; compiler-derived layout only',slot:field.slot,offset:field.offset,matching_profile:true,wrong_profile_rejected:true,profile_getter_absent:true,authority_getter_matches:true}));
+ console.log(JSON.stringify({scope:'actual minter on fresh local Anvil, synthetic router and account addresses; compiler-derived layout only',slot:field.slot,offset:field.offset,matching_profile:true,wrong_profile_rejected:true,profile_getter_absent:true,authority_getter_matches:true,creation_input_matches:true,derived_address_matches:true,constructor_replay_matches_runtime:true,runtime_keccak:ethers.keccak256(runtime)}));
 })().catch(e=>{console.error(e);process.exitCode=1;});

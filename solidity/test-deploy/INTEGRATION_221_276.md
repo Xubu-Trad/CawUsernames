@@ -48,3 +48,10 @@ The unmodified minter compiles with solc 0.8.30 and the locked OpenZeppelin 4.9.
 `minter-binding-live.cjs` deploys that compiled minter on fresh local Anvil with a synthetic router and account addresses. Reading the compiler-derived slot at the creation block recovers the supplied profile address and distinguishes a different address. Calling `CawProfile()` reverts; the public authority getter returns the supplied authority. Existing resource guards were retained and the local chain stopped afterward.
 
 Reproduce by compiling the preserved input with the pinned compiler, starting an unforked Anvil at localhost:18672, and passing the verified ethers UMD path and compiler output path to the script. This is storage-layout evidence for this exact build, not a production acceptance rule. The verifier still does not accept a profile binding from raw storage: code identity, chain identity and deployment provenance must be bound before that can be safe. It does not exercise minting or a real router.
+
+
+### Constructor replay and runtime identity
+
+The minter binding test now replays the exact compiled creation input at the preceding local block, derives the CREATE address from sender and nonce, and compares the replay result byte-for-byte with the deployed runtime at its creation block. Creation transaction input, sender and null target also match. The replay includes immutable values; no byte ranges are masked. The local result passed, alongside the existing storage/getter checks. Runtime Keccak: `0xf693be49cf57fdab3a92661319f8fcb102ad26d3cb964b0db9cbd58b3e1f6d7d`.
+
+This remains bounded local-node evidence: it trusts RPC state and the preceding block, uses a synthetic router, and does not establish production chain finality or independent historical-state authenticity. No production verifier path changed. The first startup was stopped by the existing resource guard; a later resource check cleared the unchanged limit and the run passed.
