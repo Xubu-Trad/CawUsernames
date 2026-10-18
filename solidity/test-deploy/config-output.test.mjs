@@ -53,3 +53,17 @@ test('new file default mode uses the operator umask rather than a fixed public m
  publishConfigOutputs([{file:target,content:'synthetic'}],io);
  assert.equal(applied,0o666 & ~process.umask());assert.equal(fs.readFileSync(target,'utf8'),'synthetic');
 }));
+
+test('same-byte replacement is detected by file identity before publication',()=>fixture(({dir,a,b,outputs})=>{
+ const before=fs.statSync(a);
+ outputs[1].verify=()=>{const replacement=path.join(dir,'replacement');fs.writeFileSync(replacement,'old-a');fs.chmodSync(replacement,before.mode & 0o777);fs.renameSync(replacement,a);};
+ assert.throws(()=>publishConfigOutputs(outputs),/0 file\(s\) replaced/);
+ assert.notEqual(fs.statSync(a).ino,before.ino);
+ assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');noStage(dir);
+}));
+for(const field of ['uid','gid','nlink'])test('observed '+field+' change rejects publication',()=>fixture(({dir,a,b,outputs})=>{
+ let changed=false;outputs[1].verify=()=>{changed=true;};
+ const io={...fs,lstatSync:file=>{const stat=fs.lstatSync(file);if(file===a && changed)return new Proxy(stat,{get:(target,key)=>key===field?target[field]+1:Reflect.get(target,key)});return stat;}};
+ assert.throws(()=>publishConfigOutputs(outputs,io),/0 file\(s\) replaced/);
+ assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');noStage(dir);
+}));

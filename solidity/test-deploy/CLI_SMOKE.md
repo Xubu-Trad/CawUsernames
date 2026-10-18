@@ -73,3 +73,11 @@ publication is still a sequence of renames. one successful replacement followed 
 ## default creation permissions
 
 new outputs without an explicit mode now use `0666 & ~umask`, matching ordinary file-creation policy rather than forcing `0644`. explicit env modes and existing target modes remain the higher-priority choices. 94 regressions and nine transport/generation checks pass. the new test checks the mode passed to chmod on Windows; it does not establish POSIX enforcement, Windows ACL preservation or ownership preservation.
+
+## observed target identity changes
+
+target snapshots now compare device/inode, owner/group and hard-link count as well as bytes and permission bits. a replacement with identical bytes is therefore rejected when observed before publication.
+
+98 regressions and nine transport/generation cases pass. the added filesystem case replaces a target with another same-byte file and confirms zero publication; three other cases inject changed uid/gid/link-count metadata and confirm rejection. removing the new identity comparisons produces four failures with the other 94 passing. these are local consistency checks, not ownership preservation. owner/group/link-count tests use injected metadata; the same-byte replacement uses actual files.
+
+check/rename races and changing parent directories remain possible. Windows ACLs are not compared; replacement may change ACL/ownership semantics. no lock, rollback or durable recovery has been added.

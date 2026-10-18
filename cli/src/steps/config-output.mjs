@@ -11,13 +11,13 @@ export function publishConfigOutputs(outputs, io = fs) {
     try {
       const stat = io.lstatSync(file);
       if (!stat.isFile() || stat.isSymbolicLink()) throw Error('unsupported target');
-      return { bytes: io.readFileSync(file), mode: stat.mode & 0o777 };
+      return { bytes: io.readFileSync(file), mode: stat.mode & 0o777, dev: stat.dev, ino: stat.ino, uid: stat.uid, gid: stat.gid, nlink: stat.nlink };
     } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   };
   const unchanged = entry => {
     const current = snapshot(entry.file);
     if (Boolean(current) !== Boolean(entry.original) || (current &&
-        (!current.bytes.equals(entry.original.bytes) || current.mode !== entry.original.mode))) throw Error('target changed');
+        (!current.bytes.equals(entry.original.bytes) || ['mode', 'dev', 'ino', 'uid', 'gid', 'nlink'].some(key => current[key] !== entry.original[key])))) throw Error('target changed');
   };
   let failure;
   try {
