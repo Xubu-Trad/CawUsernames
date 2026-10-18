@@ -29,3 +29,13 @@ this executes the actual command with the locked dependencies described above. d
 run `node solidity/test-deploy/history-rpc-smoke.mjs` after installing the locked CLI dependencies. the fixture uses the actual ethers JsonRpcProvider and history-floor/creation-receipt modules against a loopback HTTP server. six cases pass: matching metadata returns block 12; wrong chain, absent receipt, failed receipt, changed canonical block hash and missing ERC1271 sibling record each reject with the expected error. providers and server are closed afterward.
 
 verified with Node 24.20.0 and the 76 integrity-checked CLI dependencies, under the resource guards above. no function substitution or provider doubles are used; the HTTP responses themselves are synthetic. transaction signatures/hashes are fixture placeholders, not independently authenticated blockchain evidence. this checks RPC serialization/parsing and rejection behavior, not finality, deployed bytecode, full config generation or a complete install. those remain open.
+
+## full generator through loopback RPC
+
+the same smoke command now also calls the actual `generateConfig` export with real temporary files and the actual RPC provider. nine total cases pass, including these three additions:
+
+- validator configuration succeeds with synthetic matching history; scanner chain 84532/start block 12, environment chain, generated action address and process configuration agree. both network-selection reads occur.
+- absent receipt rejects before configuration, environment, addresses or process files are written.
+- changed storage selection on the final read rejects, but configuration, environment and process files have already been written; addresses.ts is absent. this is an observed partial-output gap, not an atomic recovery guarantee. do not start services after the failed install.
+
+fixture directories are newly created and removed by the test; no existing installation is modified. generated random environment values and local paths are not published. real filesystem writes and real provider parsing are covered, but the chain responses remain synthetic. the interactive installer, service startup, Linux permissions, live deployment receipts and runtime recovery remain outside this check. next recovery gate: prevent or safely stage partial outputs, including failure during final file publication.
