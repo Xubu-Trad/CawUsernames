@@ -72,6 +72,8 @@ export const lzEids = {
     assert.match(fs.readFileSync(path.join(dir,'client/.env'),'utf8'),/L2_CHAIN_ID=84532/);
     assert.match(fs.readFileSync(path.join(abi,'addresses.ts'),'utf8'),new RegExp(address));
     assert(fs.existsSync(path.join(dir,'ecosystem.config.cjs')));assert.equal(networkReads,2);
+    assert.match(fs.readFileSync(path.join(dir,'client/.env'),'utf8'),new RegExp('CAW_NAMES_ADDRESS='+from));
+    assert(fs.readFileSync(path.join(dir,'ecosystem.config.cjs'),'utf8').includes(JSON.stringify(path.join(dir,'client'))));
    }else{
     await assert.rejects(generateConfig('validator',cfg,dir),mode==='missing-receipt'?/History verification failed/:/installation incomplete/);
     assert.equal(fs.existsSync(path.join(abi,'addresses.ts')),false);

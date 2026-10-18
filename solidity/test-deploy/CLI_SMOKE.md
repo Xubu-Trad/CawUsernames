@@ -53,3 +53,11 @@ this is preflight validation, not a filesystem transaction. disk errors, permiss
 address publication now throws if reading or appending the sponsor environment fails. the same helper serves verified installation and standalone address regeneration, so neither path silently treats this error as success. the message states that installation is incomplete and services must not start; raw filesystem error details are not echoed.
 
 79 regression checks pass, including full-generator append failure and direct address-publication read/append failure. all three new assertions fail against the preceding generator at 94006f1f1566936352f0d432fa47b9bde9f60854. the nine real-provider transport/generation cases still pass. injected filesystem errors exercise propagation; no physical disk failure was induced. earlier files may already have been written. this is not rollback, durable recovery or a barrier against direct external process-manager commands.
+
+## render and validate before publication
+
+full generation now builds every output in memory before writing targets. backend/frontend network identifiers are validated before publication; env files retain readback validation after writes. sponsor settings join the first backend env write, removing the second append step from installation. standalone address regeneration retains its explicit append-failure rejection. process paths remain rooted in the requested installation directory.
+
+81 regression checks pass, including invalid frontend-only network selection and a later compose-rendering failure with zero output writes. the full-generator sponsor test now confirms successful output even when any append would throw, and verifies the sponsor address in the resulting env. nine transport/generation cases pass with actual provider and filesystem; these additionally check sponsor output and process working directory.
+
+this is in-memory preparation only. writes are still sequential: disk errors, chmod/readback errors, interruption and concurrent edits can leave partial output. no journal, rollback, secret backup or crash-recovery mechanism has been implemented.

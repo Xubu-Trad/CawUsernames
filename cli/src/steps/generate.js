@@ -27,86 +27,38 @@ const NETWORKS = {
  */
 export async function generateConfig(nodeType, config, installDir) {
   section('Generating Configuration')
-
   const clientDir = path.join(installDir, 'client')
-
-  // Build config.json (services to run)
   const needsHistory = ['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)
-  // Resolve and verify before writing config or secrets. Unknown history is not head.
   const history = needsHistory ? await prepareHistoryFloor(config, clientDir) : undefined
-  // Finish remote selection checks before touching an existing installation.
   const addressPlan = needsHistory ? await writeAddressesForNetwork(config, clientDir, history, { prepareOnly: true }) : undefined
-  const services = buildServiceList(nodeType, config, history)
   const configJsonPath = path.join(clientDir, 'config.json')
-  fs.writeFileSync(configJsonPath, JSON.stringify(services, null, 2) + '\n')
-  console.log(success(`  Created ${dim(configJsonPath)}`))
-
-  // Build .env. Mode 0600 — backend .env carries VALIDATOR_PRIVATE_KEY,
-  // REPLICATOR_PRIVATE_KEY, JWT_SECRET, ADMIN_TOKEN_IDS, and DB credentials.
-  // World-readable would let any user on the box read keys that authorize
-  // L2 submissions and admin-dashboard access. {mode: 0o600} on the
-  // initial write covers fresh installs; existing files we explicitly
-  // chmod afterward (writeFileSync's mode option is ignored for files
-  // that already exist — Node's documented behavior).
-  const envVars = buildEnvVars(nodeType, config, history)
   const envPath = path.join(clientDir, '.env')
-  const envContent = Object.entries(envVars)
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n') + '\n'
-  fs.writeFileSync(envPath, envContent, { mode: 0o600 })
-  fs.chmodSync(envPath, 0o600)
-  console.log(success(`  Created ${dim(envPath)} (mode 600)`))
-
-  // Same NaN/address-as-number trap as VITE_NETWORK_ID, but for the backend.
-  // NETWORK_ID is read by InstanceRegistryService, DmRelayService, DataCleaner,
-  // etc. If it got set to a wallet address by mistake, /api/instances returns
-  // a networkId of ~1.2e+48 and the peer cache is empty — the failure mode
-  // Nyaro hit. Catch it here so the operator gets a clear error at install
-  // time instead of debugging it post-deploy.
-  verifyBackendEnv(envPath)
-
-  // Build .env for frontend (Vite). Less sensitive than the backend .env
-  // (only VITE_* values, which all end up in the public JS bundle anyway),
-  // but no reason to leak. 0640 — owner write, owner+group read.
+  // Render and validate every output before changing operator files. This is
+  // an in-memory plan, not an atomic filesystem transaction or crash recovery.
+  const outputs = [{ file: configJsonPath, content: JSON.stringify(buildServiceList(nodeType, config, history), null, 2) + '\n' }]
+  const envVars = buildEnvVars(nodeType, config, history)
+  for (const [key, value] of Object.entries(addressPlan?.sponsorEnvAddrs || {})) {
+    if (value && !Object.hasOwn(envVars, key)) envVars[key] = value
+  }
+  const envContent = Object.entries(envVars).map(([key, value]) => `${key}=${value}`).join('\n') + '\n'
+  verifyBackendEnv(envPath, envContent)
+  outputs.push({ file: envPath, content: envContent, mode: 0o600, verify: verifyBackendEnv })
   if (['full', 'frontend-api', 'frontend-only'].includes(nodeType)) {
-    const frontendEnv = buildFrontendEnv(nodeType, config)
-    const frontendEnvPath = path.join(clientDir, 'src/services/FrontEnd/.env')
-    const frontendEnvContent = Object.entries(frontendEnv)
-      .map(([key, value]) => `${key}=${value}`)
-      .join('\n') + '\n'
-    fs.writeFileSync(frontendEnvPath, frontendEnvContent, { mode: 0o640 })
-    fs.chmodSync(frontendEnvPath, 0o640)
-    console.log(success(`  Created ${dim(frontendEnvPath)} (mode 640)`))
-
-    // Read the file back and confirm VITE_NETWORK_ID landed as a positive
-    // integer. If it didn't, every contract-call hook in the FE will throw
-    // `NaN can't be converted to BigInt` at runtime — a confusing failure
-    // mode that pulls operators (and their AIs) into hours of debugging the
-    // wrong layer. Fail the install instead.
-    verifyFrontendEnv(frontendEnvPath)
+    const file = path.join(clientDir, 'src/services/FrontEnd/.env')
+    const content = Object.entries(buildFrontendEnv(nodeType, config)).map(([key, value]) => `${key}=${value}`).join('\n') + '\n'
+    verifyFrontendEnv(file, content)
+    outputs.push({ file, content, mode: 0o640, verify: verifyFrontendEnv })
   }
-
-  // Build docker-compose.yml if needed
-  if (config.useDocker === 'docker') {
-    const dockerComposePath = path.join(installDir, 'docker-compose.yml')
-    fs.writeFileSync(dockerComposePath, buildDockerCompose(config))
-    console.log(success(`  Created ${dim(dockerComposePath)}`))
+  if (config.useDocker === 'docker') outputs.push({ file: path.join(installDir, 'docker-compose.yml'), content: buildDockerCompose(config) })
+  outputs.push({ file: path.join(installDir, 'ecosystem.config.cjs'), content: `module.exports = ${JSON.stringify(buildPm2Config(nodeType, config, installDir), null, 2)}\n` })
+  if (addressPlan) outputs.push({ file: path.join(clientDir, 'src/abi/addresses.ts'), content: addressPlan.out })
+  for (const output of outputs) {
+    fs.writeFileSync(output.file, output.content, output.mode ? { mode: output.mode } : undefined)
+    if (output.mode) fs.chmodSync(output.file, output.mode)
+    // Keep readback checks: validation of a planned value does not prove a write.
+    if (output.verify) output.verify(output.file)
+    console.log(success(`  Created ${dim(output.file)}`))
   }
-
-  // Build pm2 ecosystem file
-  const pm2Config = buildPm2Config(nodeType, config, installDir)
-  const pm2Path = path.join(installDir, 'ecosystem.config.cjs')
-  fs.writeFileSync(pm2Path, `module.exports = ${JSON.stringify(pm2Config, null, 2)}\n`)
-  console.log(success(`  Created ${dim(pm2Path)}`))
-
-  // Resolve the Network's storage chain on L1 + write addresses.ts. Skipped
-  // for frontend-only installs — they get their addresses from a sibling
-  // API node (the static repo file works for those, since they don't run
-  // the validator/indexer that need per-chain addresses to be exact).
-  if (['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)) {
-    applyAddressPlan(addressPlan, clientDir)
-  }
-
   return { configJsonPath, envPath }
 }
 
@@ -814,8 +766,8 @@ function parseDotenv(text) {
  * `RangeError: NaN can't be converted to BigInt`. Catch it here so the
  * operator gets a clear error at install time.
  */
-function verifyFrontendEnv(frontendEnvPath) {
-  const parsed = parseDotenv(fs.readFileSync(frontendEnvPath, 'utf8'))
+function verifyFrontendEnv(frontendEnvPath, content) {
+  const parsed = parseDotenv(content ?? fs.readFileSync(frontendEnvPath, 'utf8'))
   const check = validateNetworkId(parsed.VITE_NETWORK_ID)
   if (!check.ok) {
     throw new Error(
@@ -835,8 +787,8 @@ function verifyFrontendEnv(frontendEnvPath) {
  * address sneaking in here causes /api/instances to return networkId of
  * ~1.2e+48 and an empty peer cache, with no other obvious symptom.
  */
-function verifyBackendEnv(envPath) {
-  const parsed = parseDotenv(fs.readFileSync(envPath, 'utf8'))
+function verifyBackendEnv(envPath, content) {
+  const parsed = parseDotenv(content ?? fs.readFileSync(envPath, 'utf8'))
   const check = validateNetworkId(parsed.NETWORK_ID)
   if (!check.ok) {
     throw new Error(

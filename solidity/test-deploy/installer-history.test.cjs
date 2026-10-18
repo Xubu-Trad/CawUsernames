@@ -84,12 +84,13 @@ export const lzEids = {
  const config={network:'testnet',networkId:1,l1RpcUrl:'l1',l2RpcUrl:'storage'};
  if(missingReceipt){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/History verification failed/);assert.equal(writes.length,0);return;}
  if(secondReadFails||missingManager||unknownChain){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,missingManager?2:3);assert.equal(writes.length,0);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
- if(sponsorFailure){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),e=>{assert.match(e.message,/Sponsor environment update failed; installation incomplete/);assert.doesNotMatch(e.message,/private synthetic path/);return true;});assert.ok(files.has(key('/synthetic/client/config.json')));return;}
+
  await g.api.generateConfig('validator',config,'/synthetic');
  const services=JSON.parse(files.get(key('/synthetic/client/config.json')));
  const scanner=services.find(s=>s.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,chainId);assert.equal(scanner.config.startBlock,0);
  assert.match(files.get(key('/synthetic/client/.env')),new RegExp('L2_CHAIN_ID='+chainId+'(?:\\r?\\n|$)'));
  assert.ok(files.get(key('/synthetic/client/src/abi/addresses.ts')).includes(address));
+ assert.match(files.get(key('/synthetic/client/.env')),new RegExp('CAW_NAMES_ADDRESS='+other));
  assert.ok(files.has(key('/synthetic/ecosystem.config.cjs')));assert.equal(destroyed,3);
 }
 test('full generator keeps default chain, environment and address output consistent',()=>fullInstall('L2',84532,40245));
@@ -212,7 +213,7 @@ test('readonly doctor requires verified history without offering an unsafe scann
  assert.doesNotMatch(f.logs.join('\n'),/doctor --fix|"chainId"|"startBlock"/);
 });
 
-test('full generator rejects sponsor env append failure without disclosing the underlying error',()=>fullInstall('L2',84532,40245,{sponsorFailure:true}));
+test('full generator renders sponsor settings without a second env append',()=>fullInstall('L2',84532,40245,{sponsorFailure:true}));
 
 for(const failure of ['read','append'])test('address publication rejects sponsor env '+failure+' failure',()=>{
  let addressWrites=0;const logs=[];
@@ -223,4 +224,16 @@ for(const failure of ['read','append'])test('address publication rejects sponsor
  assert.throws(()=>g.api.applyAddressPlan({out:'address fixture',networkId:1,chainKey:'L2',sponsorEnvAddrs:{CAW_NAMES_ADDRESS:address}},'/synthetic'),e=>{
  assert.match(e.message,/Sponsor environment update failed; installation incomplete/);assert.doesNotMatch(e.message,/private input detail/);return true;});
  assert.equal(addressWrites,1);assert.ok(!logs.some(x=>x.includes('Appended')));
+});
+
+test('frontend-only invalid network id rejects before any output writes',async()=>{
+ const g=generator({crypto:require('node:crypto'),console:{log(){}},success:x=>x,dim:x=>x});
+ await assert.rejects(g.api.generateConfig('frontend-only',{network:'testnet',networkId:'not-a-number'},'/synthetic'),/NETWORK_ID is invalid/);
+ assert.equal(g.writes(),0);
+});
+
+test('late compose rendering failure rejects before planned env/config publication',async()=>{
+ const g=generator({crypto:require('node:crypto'),console:{log(){}},success:x=>x,dim:x=>x});
+ await assert.rejects(g.api.generateConfig('frontend-only',{network:'testnet',networkId:1,useDocker:'docker',dbUrl:{includes(){return false;},toString(){return 'postgresql://synthetic';},match(){throw Error('compose render failure');}}},'/synthetic'),/compose render failure/);
+ assert.equal(g.writes(),0);
 });
