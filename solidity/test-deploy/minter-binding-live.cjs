@@ -34,6 +34,18 @@ async function rpc(method,params){
  assert.equal(creation.input.toLowerCase(),init.toLowerCase());
  const runtime=await rpc('eth_getCode',[receipt.contractAddress,receipt.blockNumber]);
  assert.ok(runtime.length>2);assert.equal(runtime,replayRuntime,'constructor replay runtime mismatch');
+ // A storage-only constructor argument can change without changing runtime.
+ // Demonstrate this boundary with actual EVM replay, rather than byte edits.
+ const encode=(p,r,a)=>'0x'+minter.evm.bytecode.object+ethers.AbiCoder.defaultAbiCoder().encode(['address','address','address','address'],[token,p,r,a]).slice(2);
+ const replay=async data=>rpc('eth_call',[{from:owner,data,gas:'0xe4e1c0'},priorBlock]);
+ const wrongProfileInput=encode(owner,router.contractAddress,owner);
+ const wrongProfileRuntime=await replay(wrongProfileInput);
+ assert.equal(wrongProfileRuntime,runtime,'profile is stored, not embedded in runtime');
+ assert.notEqual(wrongProfileInput.toLowerCase(),creation.input.toLowerCase(),'creation input distinguishes changed profile');
+ const wrongAuthorityRuntime=await replay(encode(profile,router.contractAddress,profile));
+ assert.notEqual(wrongAuthorityRuntime,runtime,'changed immutable authority must alter runtime');
+ await assert.rejects(()=>replay(encode(profile,token,owner)));
+ assert.notEqual(ethers.getCreateAddress({from:owner,nonce:BigInt(nonce)+1n}).toLowerCase(),receipt.contractAddress.toLowerCase());
  const word=await rpc('eth_getStorageAt',[receipt.contractAddress,ethers.toQuantity(BigInt(field.slot)),receipt.blockNumber]);
  const actual=ethers.getAddress('0x'+word.slice(-40));
  assert.equal(actual.toLowerCase(),profile.toLowerCase());
@@ -42,5 +54,5 @@ async function rpc(method,params){
  await assert.rejects(()=>rpc('eth_call',[{to:receipt.contractAddress,data:selector},receipt.blockNumber]));
  const authorityData=await rpc('eth_call',[{to:receipt.contractAddress,data:ethers.id('pathwayExpander()').slice(0,10)},receipt.blockNumber]);
  assert.equal(ethers.AbiCoder.defaultAbiCoder().decode(['address'],authorityData)[0].toLowerCase(),owner.toLowerCase());
- console.log(JSON.stringify({scope:'actual minter on fresh local Anvil, synthetic router and account addresses; compiler-derived layout only',slot:field.slot,offset:field.offset,matching_profile:true,wrong_profile_rejected:true,profile_getter_absent:true,authority_getter_matches:true,creation_input_matches:true,derived_address_matches:true,constructor_replay_matches_runtime:true,runtime_keccak:ethers.keccak256(runtime)}));
+ console.log(JSON.stringify({scope:'actual minter on fresh local Anvil, synthetic router and account addresses; compiler-derived layout only',slot:field.slot,offset:field.offset,matching_profile:true,wrong_profile_rejected:true,profile_getter_absent:true,authority_getter_matches:true,creation_input_matches:true,derived_address_matches:true,constructor_replay_matches_runtime:true,runtime_keccak:ethers.keccak256(runtime),negative_cases:{changed_profile_same_runtime:true,changed_profile_creation_input_mismatch:true,changed_authority_runtime_mismatch:true,router_without_code_rejected:true,wrong_nonce_address_mismatch:true}}));
 })().catch(e=>{console.error(e);process.exitCode=1;});

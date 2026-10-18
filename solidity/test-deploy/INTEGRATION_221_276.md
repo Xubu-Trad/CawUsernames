@@ -55,3 +55,10 @@ Reproduce by compiling the preserved input with the pinned compiler, starting an
 The minter binding test now replays the exact compiled creation input at the preceding local block, derives the CREATE address from sender and nonce, and compares the replay result byte-for-byte with the deployed runtime at its creation block. Creation transaction input, sender and null target also match. The replay includes immutable values; no byte ranges are masked. The local result passed, alongside the existing storage/getter checks. Runtime Keccak: `0xf693be49cf57fdab3a92661319f8fcb102ad26d3cb964b0db9cbd58b3e1f6d7d`.
 
 This remains bounded local-node evidence: it trusts RPC state and the preceding block, uses a synthetic router, and does not establish production chain finality or independent historical-state authenticity. No production verifier path changed. The first startup was stopped by the existing resource guard; a later resource check cleared the unchanged limit and the run passed.
+
+
+### Negative constructor replay cases
+
+Actual EVM replays establish five boundaries: changing the profile argument produces identical runtime; that changed argument is distinguishable in creation input; changing the immutable authority changes runtime; a router address without code causes replay to revert; and changing the creator nonce changes the predicted address. All assertions pass alongside the original local checks.
+
+The first result is critical: matching runtime alone cannot authenticate a storage-only profile binding. Retain independent creation-input and storage checks. This evidence does not turn the local test into a production verifier, and RPC historical-state authenticity remains outside its scope.
