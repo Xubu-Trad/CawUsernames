@@ -1,3 +1,4 @@
+import { publishConfigOutputs } from './config-output.mjs'
 import { resolveHistoryFloor } from './history-floor.mjs'
 import crypto from 'crypto'
 import fs from 'fs'
@@ -52,13 +53,8 @@ export async function generateConfig(nodeType, config, installDir) {
   if (config.useDocker === 'docker') outputs.push({ file: path.join(installDir, 'docker-compose.yml'), content: buildDockerCompose(config) })
   outputs.push({ file: path.join(installDir, 'ecosystem.config.cjs'), content: `module.exports = ${JSON.stringify(buildPm2Config(nodeType, config, installDir), null, 2)}\n` })
   if (addressPlan) outputs.push({ file: path.join(clientDir, 'src/abi/addresses.ts'), content: addressPlan.out })
-  for (const output of outputs) {
-    fs.writeFileSync(output.file, output.content, output.mode ? { mode: output.mode } : undefined)
-    if (output.mode) fs.chmodSync(output.file, output.mode)
-    // Keep readback checks: validation of a planned value does not prove a write.
-    if (output.verify) output.verify(output.file)
-    console.log(success(`  Created ${dim(output.file)}`))
-  }
+  publishConfigOutputs(outputs)
+  for (const output of outputs) console.log(success(`  Created ${dim(output.file)}`))
   return { configJsonPath, envPath }
 }
 

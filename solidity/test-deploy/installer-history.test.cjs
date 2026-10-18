@@ -20,7 +20,7 @@ for(const [label,change] of Object.entries({
 function generator(extra={}){
  const source=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/generate.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'').replace(/await import\('ethers'\)/g,'await injectedImport()');
  let writes=0;const ctx={path,fs:{writeFileSync(){writes++;}},process:{env:{}},section(){},resolveHistoryFloor(){throw Error('not reached');}};
- Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork,applyAddressPlan};',ctx);
+ Object.assign(ctx,extra);ctx.publishConfigOutputs=outputs=>{for(const o of outputs){ctx.fs.writeFileSync(o.file,o.content,o.mode?{mode:o.mode}:undefined);if(o.mode)ctx.fs.chmodSync(o.file,o.mode);if(o.verify)o.verify(o.file);}};vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork,applyAddressPlan};',ctx);
  return {api:ctx.api,writes:()=>writes};
 }
 test('service topology allows absent history but validates supplied history',()=>{
