@@ -78,3 +78,10 @@ Full-generator regression coverage now includes default and alternate storage ch
 `buildServiceList` remains a topology helper: doctor/update drift checks and regeneration may call it without history. In that case it emits no startBlock and never reads legacy state. Invalid supplied history still rejects. Fresh `generateConfig` continues to require verified receipts before writing files. Topology generation is not proof that an indexer has a valid history floor; retain the explicit-floor startup protection from PR #329.
 
 No recovered creation manifest for the committed testnet generation is included in this branch. Merging this therefore blocks new indexer-bearing installations until a reviewed manifest is committed or supplied through CAW_CREATION_MANIFEST. A redeploy of unrelated contracts does not recover missing CawActions creation receipts. This rollout gate needs explicit review; do not treat passing tests as resolution.
+
+
+### repairing an installed service list
+
+`regen-config` and `doctor --fix` do not acquire deployment receipts. if their proposed additions include RawEventsGatherer, they refuse to write config rather than append a scanner with a default chain and unknown floor. use the receipt-verified installer with the selected chain RPC and creation manifest, preserving and reviewing existing settings before restart. missing receipts remain a blocker; these commands are not a bypass.
+
+read-only diagnostics and regen-config --dry-run still report missing services. repairs of other services continue when a scanner already exists; its configuration is preserved, not newly validated. late installer failures can still leave earlier output files, so do not restart after an incomplete run.

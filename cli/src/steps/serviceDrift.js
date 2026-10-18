@@ -103,6 +103,10 @@ export function reportServiceDrift(installDir, { fix = false } = {}) {
 
   console.log(warn(`  ⚠ ${missing.length} service(s) the installer now generates for a ${nodeType} node are missing from client/config.json:`))
   for (const m of missing) console.log(warn(`      - ${m.service}`))
+  if (fix && missing.some(s => s.service === 'RawEventsGatherer')) {
+    console.log(warn('  Cannot add RawEventsGatherer without verified deployment history. Use the receipt-verified installer with the selected chain RPC and creation manifest; preserve and review existing config before restarting.'))
+    return { ran: true, nodeType, missing, fixed: false, reason: 'verified history required' }
+  }
   if (fix) {
     const next = [...actual, ...missing]
     fs.writeFileSync(configPath, JSON.stringify(next, null, 2) + '\n')

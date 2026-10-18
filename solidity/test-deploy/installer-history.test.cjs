@@ -123,3 +123,49 @@ test('verified address generation rejects missing RPC without writes',async()=>{
  await g.api.writeAddressesForNetwork({},'/synthetic');
  assert.equal(g.writes(),0);
 });
+
+
+function driftFixture(missingNames){
+ const g=generator();const config={network:'testnet',networkId:1};
+ const installed=g.api.buildServiceList('full',config).filter(s=>!missingNames.includes(s.service));
+ const scanner=installed.find(s=>s.service==='RawEventsGatherer');if(scanner)scanner.config={chainId:421614,startBlock:123};
+ let writes=0,output;const ctx={path,buildServiceList:g.api.buildServiceList,console:{log(){}},success:x=>x,warn:x=>x,dim:x=>x,brand:x=>x,
+ fs:{existsSync:()=>true,readFileSync:p=>p.endsWith('.env')?'L1_CHAIN_ID=11155111\nNETWORK_ID=1\n':JSON.stringify(installed),writeFileSync:(_p,s)=>{writes++;output=JSON.parse(s);}}};
+ const src=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/serviceDrift.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
+ vm.createContext(ctx);vm.runInContext(src+'\nglobalThis.report=reportServiceDrift;',ctx);
+ return {run:fix=>ctx.report('/synthetic',{fix}),writes:()=>writes,output:()=>output};
+}
+test('doctor fix refuses missing scanner before any config writes',()=>{
+ const f=driftFixture(['RawEventsGatherer','DepositWatcher']);const result=f.run(true);
+ assert.equal(result.fixed,false);assert.equal(result.reason,'verified history required');assert.equal(f.writes(),0);
+});
+test('doctor still repairs ordinary services and preserves existing scanner settings',()=>{
+ const f=driftFixture(['DepositWatcher']);assert.equal(f.run(true).fixed,true);assert.equal(f.writes(),1);
+ assert.deepEqual(f.output().find(s=>s.service==='RawEventsGatherer').config,{chainId:421614,startBlock:123});
+});
+async function regenFixture({missingScanner,dryRun=false}){
+ const g=generator();let callback,writes=0,copies=0,output;const logs=[];
+ const installed=g.api.buildServiceList('full',{}).filter(s=>s.service!=='DepositWatcher'&&(!missingScanner||s.service!=='RawEventsGatherer'));
+ const scanner=installed.find(s=>s.service==='RawEventsGatherer');if(scanner)scanner.config={chainId:421614,startBlock:123};
+ const source=fs.readFileSync(path.join(__dirname,'../../cli/bin/caw.js'),'utf8');const start=source.indexOf("  .command('regen-config')");assert.ok(start>0);
+ const end=source.indexOf('\nprogram',start);assert.ok(end>start);
+ const block='program'+source.slice(start,end).replace("await import('../src/steps/generate.js')",'await injectedImport()');
+ const program={command(){return this;},description(){return this;},option(){return this;},action(fn){callback=fn;return this;}};
+ const ctx={program,path,ROOT_DIR:'/synthetic',resolveInstallDir:()=>'/synthetic',loadEnvFile:()=>({NETWORK_ID:'1'}),isValidNetworkId:()=>true,
+ injectedImport:async()=>({buildServiceList:g.api.buildServiceList}),success:x=>x,brand:x=>x,dim:x=>x,console:{log(){},error:(...v)=>logs.push(v.join(' '))},
+ process:{exit:n=>{throw Error('exit '+n);}},fs:{existsSync:()=>true,readFileSync:()=>JSON.stringify(installed),copyFileSync(){copies++;},writeFileSync:(_p,s)=>{writes++;output=JSON.parse(s);}}};
+ vm.createContext(ctx);vm.runInContext(block,ctx);
+ if(missingScanner&&!dryRun){await assert.rejects(callback({nodeType:'full'}),/exit 1/);assert.ok(logs.some(x=>x.includes('verified deployment history')));}
+ else await callback({nodeType:'full',dryRun});
+ return {writes,copies,output};
+}
+test('actual regen-config handler refuses unverified scanner before backup or writes',async()=>{
+ const r=await regenFixture({missingScanner:true});assert.equal(r.writes,0);assert.equal(r.copies,0);
+});
+test('actual regen-config dry run remains read-only with missing scanner',async()=>{
+ const r=await regenFixture({missingScanner:true,dryRun:true});assert.equal(r.writes,0);assert.equal(r.copies,0);
+});
+test('actual regen-config adds ordinary services without changing existing scanner',async()=>{
+ const r=await regenFixture({missingScanner:false});assert.equal(r.writes,1);assert.equal(r.copies,1);
+ assert.deepEqual(r.output.find(s=>s.service==='RawEventsGatherer').config,{chainId:421614,startBlock:123});
+});
