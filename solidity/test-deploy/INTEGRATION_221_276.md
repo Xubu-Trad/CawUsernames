@@ -21,3 +21,12 @@ reproduce by compiling `integration-runtime-input.json` with the same verified c
 before integration acceptance: exercise real endpoint integration, execute the full verifier with real ABI decoding and local-chain receipts, and complete independent multi-chain deployment/recovery checks. #221's constructor-binding regression is included; earlier results against older combined heads do not establish these checks for this candidate. run the library tests with `node --test solidity/test-deploy/library-verifier.test.cjs`.
 
 this branch does not update either upstream pr head or establish release approval. pinning plus owner removal prevents later owner-driven library replacement for that sealed generation. replacement/migration remains a separate design and review decision.
+
+
+### Real ABI and local receipt check
+
+`finalization-live.cjs` executes the actual finalization verification function with ethers 6.16.0 and a fresh, unforked Anvil chain (31337, loopback port 18672). A directly deployed PathwayExpander is finalized by its synthetic owner. All 12 checks pass. A subsequent successful one-wei transfer is rejected for receipt target, transaction target, calldata and missing finalization event.
+
+Supply the verified ethers UMD bundle and the solc output compiled from `integration-solc-input.json` as the two script arguments. The ethers tarball is verified against the repository lockfile integrity before extracting its bundle. Bundle SHA-256: `9a85a5aa81305f85e6546452fd2093a8a68932bed3cec4f6491e4d031a90bc95`. Local execution retains the existing memory and process guards; Anvil is stopped afterward.
+
+This checks the individual function with genuine local RPC and ABI decoding. It does not execute the complete wiring verifier, a production endpoint, or a multichain deployment. The initial harness run exposed receipt availability timing; bounded receipt polling was added before the passing run.
