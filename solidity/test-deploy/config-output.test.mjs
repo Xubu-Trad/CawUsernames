@@ -47,3 +47,9 @@ test('cleanup failure is explicit and does not expose original error details',()
  assert.throws(()=>publishConfigOutputs(outputs,io),e=>{assert.match(e.message,/staging files could not be removed/);assert.doesNotMatch(e.message,/private sentinel/);return true;});
  assert(fs.readdirSync(dir).some(x=>x.startsWith('.caw-stage-')));
 }));
+
+test('new file default mode uses the operator umask rather than a fixed public mode',()=>fixture(({dir})=>{
+ const target=path.join(dir,'new');let applied;const io={...fs,chmodSync:(file,mode)=>{applied=mode;fs.chmodSync(file,mode);}};
+ publishConfigOutputs([{file:target,content:'synthetic'}],io);
+ assert.equal(applied,0o666 & ~process.umask());assert.equal(fs.readFileSync(target,'utf8'),'synthetic');
+}));

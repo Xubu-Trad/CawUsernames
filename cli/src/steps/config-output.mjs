@@ -35,7 +35,7 @@ export function publishConfigOutputs(outputs, io = fs) {
       const bytes = io.readFileSync(temp);
       if (!bytes.equals(Buffer.from(output.content))) throw Error('staged bytes differ');
       if (output.verify) output.verify(temp);
-      io.chmodSync(temp, output.mode ?? original?.mode ?? 0o644);
+      io.chmodSync(temp, output.mode ?? original?.mode ?? (0o666 & ~process.umask()));
     }
     // Check every target before the first replacement, then again per file.
     for (const entry of staged) unchanged(entry);
