@@ -62,3 +62,12 @@ This remains bounded local-node evidence: it trusts RPC state and the preceding 
 Actual EVM replays establish five boundaries: changing the profile argument produces identical runtime; that changed argument is distinguishable in creation input; changing the immutable authority changes runtime; a router address without code causes replay to revert; and changing the creator nonce changes the predicted address. All assertions pass alongside the original local checks.
 
 The first result is critical: matching runtime alone cannot authenticate a storage-only profile binding. Retain independent creation-input and storage checks. This evidence does not turn the local test into a production verifier, and RPC historical-state authenticity remains outside its scope.
+
+
+### Complete unsealed verifier through local EVM RPC
+
+`wiring-live.cjs` runs the complete verifier with real ethers ABI decoding and a local EVM response fixture. Matching wiring: 43 passed, 0 failed. Wrong minter authority and absent minter code both exit with failure. The three runs perform 96 eth_call requests.
+
+This fixture installs synthetic response bytecode and storage through Anvil test methods; it does not deploy CAW or LayerZero contracts. All three role providers use one unforked local chain. It covers the unsealed testnet path only; finalization and mainnet library pinning are skipped by that path. Run with a fresh Anvil at localhost:18672 and the verified ethers UMD path as the first argument. The actual local run retained resource guards and stopped Anvil afterward.
+
+During fixture development, the initial address range collided with a reserved precompile and returned empty ABI data; fixture addresses were moved out of that range. A subsequent console encoding problem was corrected by limiting the result output to summaries. The final guarded run passed. These were fixture failures, not protocol findings.
