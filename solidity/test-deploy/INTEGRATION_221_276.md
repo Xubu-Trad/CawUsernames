@@ -39,3 +39,12 @@ Includes the verifier-only fix from PR #332 (`da429fa64932cf9250d2f5ce2e5b8433b6
 Combined validation: 164/164 tests pass (124 deployment-runner, 25 finalization-function, 11 library-function and 4 complete-script minter tests). These use mocked boundaries. The separate real-ABI/local-Anvil finalization check passes again: 12 checks for genuine finalization; an unrelated successful transfer is rejected on four action-binding checks. Syntax passes. Local services were stopped afterward. Full multichain and production endpoint verification remain open.
 
 From `solidity`, run `node --test test-deploy/sealed-wiring.test.cjs test-deploy/finalization-verifier.test.cjs test-deploy/library-verifier.test.cjs test-deploy/minter-verifier.test.cjs`. Local validation used serial execution and existing process and memory guards.
+
+
+### Internal minter profile binding: bounded local evidence
+
+The unmodified minter compiles with solc 0.8.30 and the locked OpenZeppelin 4.9.6 sources, with no compiler errors or warnings. `minter-binding-solc-input.json` preserves the compiler input (SHA-256 `ec413648faf0c6de9b96637a83d3d2ec46a2b71b2f407212bebf1851a10a9d03`). The compiler reports `CawProfile` at slot 1, offset 0, 20 bytes. Its ABI has no public profile getter.
+
+`minter-binding-live.cjs` deploys that compiled minter on fresh local Anvil with a synthetic router and account addresses. Reading the compiler-derived slot at the creation block recovers the supplied profile address and distinguishes a different address. Calling `CawProfile()` reverts; the public authority getter returns the supplied authority. Existing resource guards were retained and the local chain stopped afterward.
+
+Reproduce by compiling the preserved input with the pinned compiler, starting an unforked Anvil at localhost:18672, and passing the verified ethers UMD path and compiler output path to the script. This is storage-layout evidence for this exact build, not a production acceptance rule. The verifier still does not accept a profile binding from raw storage: code identity, chain identity and deployment provenance must be bound before that can be safe. It does not exercise minting or a real router.

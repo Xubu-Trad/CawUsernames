@@ -1,0 +1,35 @@
+'use strict';
+// Local evidence only. This is not an acceptance path for arbitrary contracts.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const ethers=require(path.resolve(process.argv[2]));
+const output=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+async function rpc(method,params){
+ const r=await fetch('http://127.0.0.1:18672',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+ const data=await r.json();if(data.error)throw Error(JSON.stringify(data.error));return data.result;
+}
+(async()=>{
+ assert.equal(await rpc('eth_chainId',[]),'0x7a69');
+ const [owner,profile,token]=await rpc('eth_accounts',[]);
+ const minter=output.contracts['contracts/CawProfileMinter.sol'].CawProfileMinter;
+ assert.ok(!minter.abi.some(x=>x.type==='function'&&x.name==='CawProfile'));
+ const layout=minter.storageLayout;
+ const field=layout.storage.find(x=>x.label==='CawProfile');assert.ok(field);
+ assert.equal(field.offset,0);assert.equal(layout.types[field.type].numberOfBytes,'20');
+ async function deploy(code,args=''){
+  const hash=await rpc('eth_sendTransaction',[{from:owner,data:'0x'+code+args,gas:'0xe4e1c0'}]);
+  let receipt;for(let i=0;i<50;i++){receipt=await rpc('eth_getTransactionReceipt',[hash]);if(receipt)break;await new Promise(r=>setTimeout(r,100));}
+  assert.ok(receipt);assert.equal(receipt.status,'0x1');return receipt;
+ }
+ const router=await deploy(output.contracts['test-deploy/BindingRouter.sol'].BindingRouter.evm.bytecode.object);
+ const args=ethers.AbiCoder.defaultAbiCoder().encode(['address','address','address','address'],[token,profile,router.contractAddress,owner]).slice(2);
+ const receipt=await deploy(minter.evm.bytecode.object,args);
+ const word=await rpc('eth_getStorageAt',[receipt.contractAddress,ethers.toQuantity(BigInt(field.slot)),receipt.blockNumber]);
+ const actual=ethers.getAddress('0x'+word.slice(-40));
+ assert.equal(actual.toLowerCase(),profile.toLowerCase());
+ assert.notEqual(actual.toLowerCase(),owner.toLowerCase());
+ const selector=ethers.id('CawProfile()').slice(0,10);
+ await assert.rejects(()=>rpc('eth_call',[{to:receipt.contractAddress,data:selector},receipt.blockNumber]));
+ const authorityData=await rpc('eth_call',[{to:receipt.contractAddress,data:ethers.id('pathwayExpander()').slice(0,10)},receipt.blockNumber]);
+ assert.equal(ethers.AbiCoder.defaultAbiCoder().decode(['address'],authorityData)[0].toLowerCase(),owner.toLowerCase());
+ console.log(JSON.stringify({scope:'actual minter on fresh local Anvil, synthetic router and account addresses; compiler-derived layout only',slot:field.slot,offset:field.offset,matching_profile:true,wrong_profile_rejected:true,profile_getter_absent:true,authority_getter_matches:true}));
+})().catch(e=>{console.error(e);process.exitCode=1;});
