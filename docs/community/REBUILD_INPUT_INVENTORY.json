@@ -1,0 +1,105 @@
+{
+  "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+  "npm_locks": [
+    {
+      "path": "cli/package-lock.json",
+      "sha256": "b6788fc18b501245d872fd9165e8103baac299fec9c9ec69ad625a417a00e2a9",
+      "lockfileVersion": 3,
+      "package_entries": 76,
+      "entries_without_integrity": [],
+      "non_registry_sources": []
+    },
+    {
+      "path": "client/package-lock.json",
+      "sha256": "0997164eb8577a6d4c23a20db1617561b82d13f5786fe680fd408141f0e25463",
+      "lockfileVersion": 2,
+      "package_entries": 1336,
+      "entries_without_integrity": [
+        "../smltxt"
+      ],
+      "non_registry_sources": []
+    },
+    {
+      "path": "client/src/services/Verifier/package-lock.json",
+      "sha256": "e2a20393c956e6fefbaff2feca5d5a28499a56c63623ec0e237686fa82f70e9b",
+      "lockfileVersion": 3,
+      "package_entries": 83,
+      "entries_without_integrity": [],
+      "non_registry_sources": []
+    },
+    {
+      "path": "mcp-server/package-lock.json",
+      "sha256": "2021b6b10f658cc9a61c241e1adc7f511bafe369da5eaf7d8133516b436d4385",
+      "lockfileVersion": 3,
+      "package_entries": 139,
+      "entries_without_integrity": [
+        "../smltxt"
+      ],
+      "non_registry_sources": []
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "50e8bfff614b14bff7bf4a7305af91f064a7a44ff70320bf17a0ea6b4602c8de",
+      "lockfileVersion": 3,
+      "package_entries": 35,
+      "entries_without_integrity": [],
+      "non_registry_sources": []
+    },
+    {
+      "path": "solidity/package-lock.json",
+      "sha256": "2ed4876f494ed4e02703b825fdd84475781fdd974c4374f71cb53d32fd3f1601",
+      "lockfileVersion": 3,
+      "package_entries": 1180,
+      "entries_without_integrity": [
+        "node_modules/ethereumjs-abi"
+      ],
+      "non_registry_sources": [
+        {
+          "package": "node_modules/ethereumjs-abi",
+          "resolved": "git+ssh://git@github.com/ethereumjs/ethereumjs-abi.git#ee3994657fa7a427238e6ba92a84d0b529bbcde0"
+        }
+      ]
+    }
+  ],
+  "other_locks": [
+    "client/src/services/FrontEnd/yarn.lock",
+    "client/yarn.lock",
+    "solidity/zk/sig-recovery/Cargo.lock"
+  ],
+  "elf_paths": [],
+  "evidence": [
+    {
+      "path": "install.sh",
+      "sha256": "1319c2aa5a0da9f9a58fe86c500ca49c835ead6ae0db87b255a33220c8a281a4"
+    },
+    {
+      "path": "cli/src/steps/infrastructure.js",
+      "sha256": "9460b5386dd56c5df63eb979da1396a5e986f00139f3015f37ca0ea839e4c43a"
+    },
+    {
+      "path": "cli/src/steps/generate.js",
+      "sha256": "a5218e85bbf6188a1579d27ad741ec6c2741bae2217e3c194edca1f6de6b2635"
+    },
+    {
+      "path": "solidity/zk/sig-recovery/rust-toolchain",
+      "sha256": "4415f5bcc3f634c4164975633d66c64b1788847d79917109878278f9ff8dd1a2"
+    },
+    {
+      "path": "solidity/zk/sig-recovery/VKEY_REPRODUCIBILITY.md",
+      "sha256": "7dd2a2e87a75692f63f44dbd02fe05ac52f9c4dc63d4e9f7a94e172db4d575cc"
+    },
+    {
+      "path": "solidity/zk/sig-recovery/script/build.rs",
+      "sha256": "ca964185ddab51b752b131d8839fa8402979b4411e7317d92fa9841dc38c79f1"
+    },
+    {
+      "path": "solidity/hardhat.config.js",
+      "sha256": "abad057942b61fb33b861ef03147c27bc7f56b37a99537da10b45f28a93e76ab"
+    },
+    {
+      "path": "solidity/test/zk-fixtures/groth16-fixture.json",
+      "sha256": "796aebb34740e2031f6cad97016e0703cb7cc1ae6fe0cfcabd60e668f0e16f55"
+    }
+  ],
+  "scope": "Static object inspection, not installation, dependency availability, checksum verification of downloads or a full rebuild."
+}
