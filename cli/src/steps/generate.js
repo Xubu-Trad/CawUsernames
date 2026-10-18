@@ -291,7 +291,9 @@ function applyAddressPlan({ out, networkId, chainKey, sponsorEnvAddrs }, clientD
       console.log(success(`  Appended ${toAppend.length} sponsor address var(s) to ${dim('.env')}`))
     }
   } catch (e) {
-    console.log(warn(`  Could not append sponsor addresses to .env: ${e.message}`))
+    // Never report a completed installation or address repair with missing settings.
+    // Earlier output may exist; do not echo filesystem/provider details or secrets.
+    throw new Error('Sponsor environment update failed; installation incomplete. Do not start services; review existing files and rerun.')
   }
 }
 

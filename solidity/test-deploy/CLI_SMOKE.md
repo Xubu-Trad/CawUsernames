@@ -47,3 +47,9 @@ the generator now prepares the address output and completes the second storage-s
 76 regression checks and all nine transport/generation cases pass. the transport case starts with existing operator config, environment and process files and confirms all three remain byte-identical when selection changes. running this same assertion against the prior generator at dc27ba2007140349ecefc33288007d3d67925fba fails because it overwrites the operator config. missing-manager, failed-read and unknown-chain regression cases also require zero writes.
 
 this is preflight validation, not a filesystem transaction. disk errors, permission errors, process interruption or later validation failures may still leave partial output. changes on-chain after the last observation remain possible. no atomic recovery or finality claim is made.
+
+## sponsor environment failure propagation
+
+address publication now throws if reading or appending the sponsor environment fails. the same helper serves verified installation and standalone address regeneration, so neither path silently treats this error as success. the message states that installation is incomplete and services must not start; raw filesystem error details are not echoed.
+
+79 regression checks pass, including full-generator append failure and direct address-publication read/append failure. all three new assertions fail against the preceding generator at 94006f1f1566936352f0d432fa47b9bde9f60854. the nine real-provider transport/generation cases still pass. injected filesystem errors exercise propagation; no physical disk failure was induced. earlier files may already have been written. this is not rollback, durable recovery or a barrier against direct external process-manager commands.

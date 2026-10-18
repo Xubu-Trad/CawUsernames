@@ -20,7 +20,7 @@ for(const [label,change] of Object.entries({
 function generator(extra={}){
  const source=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/generate.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'').replace(/await import\('ethers'\)/g,'await injectedImport()');
  let writes=0;const ctx={path,fs:{writeFileSync(){writes++;}},process:{env:{}},section(){},resolveHistoryFloor(){throw Error('not reached');}};
- Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork};',ctx);
+ Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork,applyAddressPlan};',ctx);
  return {api:ctx.api,writes:()=>writes};
 }
 test('service topology allows absent history but validates supplied history',()=>{
@@ -36,7 +36,7 @@ test('actual preparation resolves network identity and manifest before returning
  const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0;
  const txt=`export const deployments = {
   testnet: {
-    L1: { CawNetworkManager: '${other}'
+    L1: { CawNetworkManager: '${other}', CawProfile: '${other}'
     },
     L2: { CawActions: '${address}'
     },
@@ -55,13 +55,13 @@ export const lzEids = {
  storage.send=async()=> '0x1';await assert.rejects(g.api.prepareHistoryFloor({l1RpcUrl:'l1',l2RpcUrl:'storage'},'/synthetic'),/History verification failed/);assert.equal(destroyed,4);
 });
 
-async function fullInstall(role,chainId,eid,{missingReceipt=false,secondReadFails=false,missingManager=false,unknownChain=false}={}) {
+async function fullInstall(role,chainId,eid,{missingReceipt=false,secondReadFails=false,missingManager=false,unknownChain=false,sponsorFailure=false}={}) {
  const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0,networkReads=0,deploymentReads=0;
  f.manifest.contracts={['CawActions_'+role]:{...f.manifest.contracts.CawActions_L2,chainId}};
  if(missingReceipt)f.manifest.contracts={};
  const txt=`export const deployments = {
   testnet: {
-    L1: { CawNetworkManager: '${other}'
+    L1: { CawNetworkManager: '${other}', CawProfile: '${other}'
     },
     ${role}: { CawActions: '${address}', CawProfileLedger: '${other}'
     },
@@ -72,7 +72,7 @@ export const lzEids = {
   },
 }`;
  const files=new Map(),writes=[];const key=p=>path.normalize(p);
- const fakeFs={existsSync:p=>files.has(key(p)),writeFileSync:(p,data)=>{writes.push(key(p));files.set(key(p),data);},chmodSync(){},appendFileSync:(p,data)=>files.set(key(p),(files.get(key(p))||'')+data),readFileSync:p=>{
+ const fakeFs={existsSync:p=>files.has(key(p)),writeFileSync:(p,data)=>{writes.push(key(p));files.set(key(p),data);},chmodSync(){},appendFileSync:(p,data)=>{if(sponsorFailure)throw Error('private synthetic path');files.set(key(p),(files.get(key(p))||'')+data);},readFileSync:p=>{
  if(p.endsWith('deployments.ts')){deploymentReads++;return missingManager&&deploymentReads>1?txt.replace('CawNetworkManager:', 'MissingManager:'):txt;}
  if(p.includes('creation-receipts.'))return JSON.stringify(f.manifest);
  if(!files.has(key(p)))throw Error('missing synthetic file');return files.get(key(p));
@@ -84,6 +84,7 @@ export const lzEids = {
  const config={network:'testnet',networkId:1,l1RpcUrl:'l1',l2RpcUrl:'storage'};
  if(missingReceipt){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/History verification failed/);assert.equal(writes.length,0);return;}
  if(secondReadFails||missingManager||unknownChain){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,missingManager?2:3);assert.equal(writes.length,0);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
+ if(sponsorFailure){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),e=>{assert.match(e.message,/Sponsor environment update failed; installation incomplete/);assert.doesNotMatch(e.message,/private synthetic path/);return true;});assert.ok(files.has(key('/synthetic/client/config.json')));return;}
  await g.api.generateConfig('validator',config,'/synthetic');
  const services=JSON.parse(files.get(key('/synthetic/client/config.json')));
  const scanner=services.find(s=>s.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,chainId);assert.equal(scanner.config.startBlock,0);
@@ -209,4 +210,17 @@ test('readonly doctor requires verified history without offering an unsafe scann
  assert.equal(result.fixed,false);assert.equal(result.reason,'verified history required');assert.equal(f.writes(),0);
  assert.match(f.logs.join('\n'),/receipt-verified installer/);
  assert.doesNotMatch(f.logs.join('\n'),/doctor --fix|"chainId"|"startBlock"/);
+});
+
+test('full generator rejects sponsor env append failure without disclosing the underlying error',()=>fullInstall('L2',84532,40245,{sponsorFailure:true}));
+
+for(const failure of ['read','append'])test('address publication rejects sponsor env '+failure+' failure',()=>{
+ let addressWrites=0;const logs=[];
+ const g=generator({console:{log:x=>logs.push(x)},success:x=>x,dim:x=>x,warn:x=>x,
+ fs:{writeFileSync(){addressWrites++;},existsSync:()=>true,
+ readFileSync(){if(failure==='read')throw Error('private input detail');return 'NETWORK_ID=1\n';},
+ appendFileSync(){throw Error('private input detail');}}});
+ assert.throws(()=>g.api.applyAddressPlan({out:'address fixture',networkId:1,chainKey:'L2',sponsorEnvAddrs:{CAW_NAMES_ADDRESS:address}},'/synthetic'),e=>{
+ assert.match(e.message,/Sponsor environment update failed; installation incomplete/);assert.doesNotMatch(e.message,/private input detail/);return true;});
+ assert.equal(addressWrites,1);assert.ok(!logs.some(x=>x.includes('Appended')));
 });
