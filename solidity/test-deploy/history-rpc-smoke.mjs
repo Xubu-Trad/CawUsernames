@@ -34,7 +34,7 @@ try{
    const args={environment:'testnet',chainKey:'L2',chainId:84532,addresses:{CawActions:address,...(mode==='missing-sibling'?{CawActionsERC1271:'0x'+'77'.repeat(20)}:{})},manifest,provider};
    if(mode==='valid')assert.deepEqual(await resolveHistoryFloor(args),{chainId:84532,chainKey:'L2',actions:address,startBlock:12});
    else await assert.rejects(resolveHistoryFloor(args),mode==='wrong-chain'?/RPC chain mismatch/:mode==='missing-receipt'?/unavailable/:mode==='failed-receipt'?/unsuccessful/:mode==='reorg'?/canonical block/:/Missing creation metadata/);
-   console.log('PASS '+mode);
+   console.log('PASS '+mode+(mode==='generate-valid'&&process.platform==='win32'?' (Windows publication refused)':''));
   }finally{provider.destroy();}
  }
  for(mode of ['generate-valid','missing-receipt','late-change']){
@@ -65,7 +65,11 @@ export const lzEids = {
   // Restore the caller's manifest override after this isolated fixture.
   const override=process.env.CAW_CREATION_MANIFEST;delete process.env.CAW_CREATION_MANIFEST;
   try{
-   if(mode==='generate-valid'){
+   if(mode==='generate-valid' && process.platform==='win32'){
+    await assert.rejects(generateConfig('validator',cfg,dir),/unavailable on Windows/);
+    for(const name of ['client/config.json','client/.env','ecosystem.config.cjs','client/src/abi/addresses.ts'])assert.equal(fs.existsSync(path.join(dir,name)),false);
+    assert.equal(networkReads,2);
+   }else if(mode==='generate-valid'){
     await generateConfig('validator',cfg,dir);
     const scanner=JSON.parse(fs.readFileSync(path.join(dir,'client/config.json'))).find(x=>x.service==='RawEventsGatherer');
     assert.equal(scanner.config.chainId,84532);assert.equal(scanner.config.startBlock,12);
@@ -85,7 +89,7 @@ export const lzEids = {
      for(const name of ['client/config.json','client/.env','ecosystem.config.cjs'])assert.equal(fs.existsSync(path.join(dir,name)),false);
     }
    }
-   console.log('PASS '+mode);
+   console.log('PASS '+mode+(mode==='generate-valid'&&process.platform==='win32'?' (Windows publication refused)':''));
   }finally{
    if(override===undefined)delete process.env.CAW_CREATION_MANIFEST;else process.env.CAW_CREATION_MANIFEST=override;
    // Only remove this invocation's freshly-created temporary fixture.

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { publishConfigOutputs } from '../../cli/src/steps/config-output.mjs';
+import { publishConfigOutputs } from '../../cli/src/steps/config-output-core.mjs';
+import { publishConfigOutputs as publishSupportedOutputs } from '../../cli/src/steps/config-output.mjs';
 function fixture(run) {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'caw-stage-test-'));
  try { const a=path.join(dir,'a'),b=path.join(dir,'b');fs.writeFileSync(a,'old-a');fs.writeFileSync(b,'old-b');run({dir,a,b,outputs:[{file:a,content:'new-a',mode:0o600},{file:b,content:'new-b'}]}); }
@@ -65,5 +66,14 @@ for(const field of ['uid','gid','nlink'])test('observed '+field+' change rejects
  let changed=false;outputs[1].verify=()=>{changed=true;};
  const io={...fs,lstatSync:file=>{const stat=fs.lstatSync(file);if(file===a && changed)return new Proxy(stat,{get:(target,key)=>key===field?target[field]+1:Reflect.get(target,key)});return stat;}};
  assert.throws(()=>publishConfigOutputs(outputs,io),/0 file\(s\) replaced/);
+ assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');noStage(dir);
+}));
+
+test('Windows production publisher refuses before any filesystem operation', {skip:process.platform!=='win32'},()=>{
+ const io=new Proxy({}, {get(){throw Error('filesystem reached');}});
+ assert.throws(()=>publishSupportedOutputs([{file:'synthetic',content:'synthetic'}],io),/unavailable on Windows/);
+});
+test('Windows refusal preserves existing files and creates no stage files', {skip:process.platform!=='win32'},()=>fixture(({dir,a,b,outputs})=>{
+ assert.throws(()=>publishSupportedOutputs(outputs),/unavailable on Windows/);
  assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');noStage(dir);
 }));

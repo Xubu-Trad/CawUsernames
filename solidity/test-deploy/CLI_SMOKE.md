@@ -96,3 +96,11 @@ this establishes a Windows permission-preservation defect. it does not establish
 reproduction outline: create a disposable directory and synthetic file; use Get-Acl/Set-Acl to disable inheritance and set a current-user-only allow rule; record AreAccessRulesProtected and Sddl; call publishConfigOutputs for that file with synthetic content and mode0600; inspect those two properties again. retain the existing test resource guards.
 
 **do not merge the staged-replacement portion as permission-safe or use it on real Windows secret files.** it needs ACL-aware preservation with independent verification, or a supported-platform rejection that fails before mutation. POSIX ownership/extended ACL behavior also remains unverified. this finding narrows the earlier successful smoke results: bytes and rejection behavior passed; permission preservation did not.
+
+## Windows staged publication disabled pending ACL support
+
+production `publishConfigOutputs` now rejects Windows before any snapshot reads, staging or destination writes. there is no CLI override. the staging algorithm is separated into an internal module for focused tests; production generation imports the guarded wrapper. this deliberately makes full configuration generation unavailable on Windows until ACL-preserving replacement is implemented. it does not claim to fix or support Windows ACL replacement.
+
+100 regressions pass. two added checks verify rejection before any filesystem operation and preservation of existing targets. nine transport/generation cases pass, but the valid-history Windows case now expects publication refusal with no output files; it is not successful Windows installation evidence. the internal staging tests still run against synthetic files to exercise algorithm behavior, separately from supported production behavior.
+
+the protected-ACL fixture was rerun with the guarded production function: expected refusal, identical file hash, identical security descriptor and protected inheritance still true. only a synthetic file was used. POSIX ownership/extended ACL preservation, crash recovery, writer exclusion and rollback remain unresolved; non-Windows acceptance is not proof of those properties. standalone address regeneration is outside this staged-publication path and its behavior is unchanged.
