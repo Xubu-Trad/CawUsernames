@@ -57,6 +57,11 @@ export const lzEids = {
   fs.writeFileSync(path.join(abi,'creation-receipts.testnet.json'),JSON.stringify(manifest));
   const url=`http://127.0.0.1:${server.address().port}`;
   const cfg={network:'testnet',networkId:1,l1RpcUrl:url+'/l1',l2RpcUrl:url+'/storage'};
+  if(mode==='late-change'){
+   fs.writeFileSync(path.join(dir,'client/config.json'),'operator config');
+   fs.writeFileSync(path.join(dir,'client/.env'),'operator env');
+   fs.writeFileSync(path.join(dir,'ecosystem.config.cjs'),'operator process');
+  }
   // Restore the caller's manifest override after this isolated fixture.
   const override=process.env.CAW_CREATION_MANIFEST;delete process.env.CAW_CREATION_MANIFEST;
   try{
@@ -70,9 +75,13 @@ export const lzEids = {
    }else{
     await assert.rejects(generateConfig('validator',cfg,dir),mode==='missing-receipt'?/History verification failed/:/installation incomplete/);
     assert.equal(fs.existsSync(path.join(abi,'addresses.ts')),false);
-    assert.equal(fs.existsSync(path.join(dir,'client/config.json')),mode==='late-change');
-    assert.equal(fs.existsSync(path.join(dir,'client/.env')),mode==='late-change');
-    assert.equal(fs.existsSync(path.join(dir,'ecosystem.config.cjs')),mode==='late-change');
+    if(mode==='late-change'){
+     assert.equal(fs.readFileSync(path.join(dir,'client/config.json'),'utf8'),'operator config');
+     assert.equal(fs.readFileSync(path.join(dir,'client/.env'),'utf8'),'operator env');
+     assert.equal(fs.readFileSync(path.join(dir,'ecosystem.config.cjs'),'utf8'),'operator process');
+    }else{
+     for(const name of ['client/config.json','client/.env','ecosystem.config.cjs'])assert.equal(fs.existsSync(path.join(dir,name)),false);
+    }
    }
    console.log('PASS '+mode);
   }finally{

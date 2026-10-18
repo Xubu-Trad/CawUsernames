@@ -83,7 +83,7 @@ export const lzEids = {
  makeProvider:(_e,url)=>url==='l1'?l1:storage,injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>{networkReads++;if(secondReadFails&&networkReads===2)throw Error('private RPC detail');return unknownChain&&networkReads===2?99999:eid;}};}}})});
  const config={network:'testnet',networkId:1,l1RpcUrl:'l1',l2RpcUrl:'storage'};
  if(missingReceipt){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/History verification failed/);assert.equal(writes.length,0);return;}
- if(secondReadFails||missingManager||unknownChain){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,missingManager?2:3);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
+ if(secondReadFails||missingManager||unknownChain){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,missingManager?2:3);assert.equal(writes.length,0);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
  await g.api.generateConfig('validator',config,'/synthetic');
  const services=JSON.parse(files.get(key('/synthetic/client/config.json')));
  const scanner=services.find(s=>s.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,chainId);assert.equal(scanner.config.startBlock,0);

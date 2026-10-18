@@ -30,7 +30,7 @@ run `node solidity/test-deploy/history-rpc-smoke.mjs` after installing the locke
 
 verified with Node 24.20.0 and the 76 integrity-checked CLI dependencies, under the resource guards above. no function substitution or provider doubles are used; the HTTP responses themselves are synthetic. transaction signatures/hashes are fixture placeholders, not independently authenticated blockchain evidence. this checks RPC serialization/parsing and rejection behavior, not finality, deployed bytecode, full config generation or a complete install. those remain open.
 
-## full generator through loopback RPC
+## full generator through loopback RPC — initial observation
 
 the same smoke command now also calls the actual `generateConfig` export with real temporary files and the actual RPC provider. nine total cases pass, including these three additions:
 
@@ -39,3 +39,11 @@ the same smoke command now also calls the actual `generateConfig` export with re
 - changed storage selection on the final read rejects, but configuration, environment and process files have already been written; addresses.ts is absent. this is an observed partial-output gap, not an atomic recovery guarantee. do not start services after the failed install.
 
 fixture directories are newly created and removed by the test; no existing installation is modified. generated random environment values and local paths are not published. real filesystem writes and real provider parsing are covered, but the chain responses remain synthetic. the interactive installer, service startup, Linux permissions, live deployment receipts and runtime recovery remain outside this check. next recovery gate: prevent or safely stage partial outputs, including failure during final file publication.
+
+## selection checks before output writes
+
+the generator now prepares the address output and completes the second storage-selection read before writing configuration, environment or process files. it applies that prepared address output after the environment is generated. this removes the partial-output case caused by a failed/changed network-selection recheck.
+
+76 regression checks and all nine transport/generation cases pass. the transport case starts with existing operator config, environment and process files and confirms all three remain byte-identical when selection changes. running this same assertion against the prior generator at dc27ba2007140349ecefc33288007d3d67925fba fails because it overwrites the operator config. missing-manager, failed-read and unknown-chain regression cases also require zero writes.
+
+this is preflight validation, not a filesystem transaction. disk errors, permission errors, process interruption or later validation failures may still leave partial output. changes on-chain after the last observation remain possible. no atomic recovery or finality claim is made.

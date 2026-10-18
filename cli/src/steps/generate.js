@@ -34,6 +34,8 @@ export async function generateConfig(nodeType, config, installDir) {
   const needsHistory = ['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)
   // Resolve and verify before writing config or secrets. Unknown history is not head.
   const history = needsHistory ? await prepareHistoryFloor(config, clientDir) : undefined
+  // Finish remote selection checks before touching an existing installation.
+  const addressPlan = needsHistory ? await writeAddressesForNetwork(config, clientDir, history, { prepareOnly: true }) : undefined
   const services = buildServiceList(nodeType, config, history)
   const configJsonPath = path.join(clientDir, 'config.json')
   fs.writeFileSync(configJsonPath, JSON.stringify(services, null, 2) + '\n')
@@ -102,7 +104,7 @@ export async function generateConfig(nodeType, config, installDir) {
   // API node (the static repo file works for those, since they don't run
   // the validator/indexer that need per-chain addresses to be exact).
   if (['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)) {
-    await writeAddressesForNetwork(config, clientDir, history)
+    applyAddressPlan(addressPlan, clientDir)
   }
 
   return { configJsonPath, envPath }
@@ -114,7 +116,7 @@ export async function generateConfig(nodeType, config, installDir) {
  * addresses.ts. The rest of the codebase imports singular constants from
  * addresses.ts and stays multi-chain-unaware.
  */
-export async function writeAddressesForNetwork(config, clientDir, history) {
+export async function writeAddressesForNetwork(config, clientDir, history, { prepareOnly = false } = {}) {
   const env = config.network || 'testnet'
   const networkId = Number(config.networkId || 1)
   const l1RpcUrl = config.l1RpcUrlHttp || config.l1RpcUrl
@@ -257,22 +259,23 @@ export async function writeAddressesForNetwork(config, clientDir, history) {
       }
     }
   }
-  const out = lines.join('\n') + '\n'
+  const plan = {
+    out: lines.join('\n') + '\n', networkId, chainKey,
+    sponsorEnvAddrs: {
+      CAW_NAMES_MINTER_ADDRESS: consts.CAW_NAMES_MINTER_ADDRESS,
+      CAW_NAMES_ADDRESS: consts.CAW_NAMES_ADDRESS,
+      SMART_EOA_ADDRESS: consts.SMART_EOA_ADDRESS,
+    },
+  }
+  if (prepareOnly) return plan
+  applyAddressPlan(plan, clientDir)
+}
+
+function applyAddressPlan({ out, networkId, chainKey, sponsorEnvAddrs }, clientDir) {
   const outPath = path.join(clientDir, 'src/abi/addresses.ts')
   fs.writeFileSync(outPath, out)
   console.log(success(`  Wrote ${dim(outPath)} (Network ${networkId} → ${chainKey})`))
-
-  // SponsorService reads three of these addresses from process.env (NOT from
-  // addresses.ts): CAW_NAMES_MINTER_ADDRESS, CAW_NAMES_ADDRESS, SMART_EOA_ADDRESS.
-  // .env was written earlier in generateConfig() — before these addresses were
-  // resolved on-chain — so we append them here. Without this the sponsor server
-  // boots "disabled" and /api/sponsor/bootstrap 503s. Idempotent: skip a key
-  // that's already present (e.g. an operator who set it by hand or a re-run).
-  const sponsorEnvAddrs = {
-    CAW_NAMES_MINTER_ADDRESS: consts.CAW_NAMES_MINTER_ADDRESS,
-    CAW_NAMES_ADDRESS: consts.CAW_NAMES_ADDRESS,
-    SMART_EOA_ADDRESS: consts.SMART_EOA_ADDRESS,
-  }
+  // Append the already-resolved sponsor addresses after the new .env exists.
   const envPath = path.join(clientDir, '.env')
   try {
     const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
