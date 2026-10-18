@@ -398,16 +398,18 @@ export function buildServiceList(nodeType, config, history) {
   }
 
   if (RUNS_INDEXER) {
-    if (!history || !Number.isSafeInteger(history.startBlock) || history.startBlock < 0 ||
-        !Number.isSafeInteger(history.chainId) || history.chainId <= 0) {
+    // Diagnostics need service topology without receipt acquisition. Fresh
+    // installs still call prepareHistoryFloor before this pure helper.
+    if (history && (!Number.isSafeInteger(history.startBlock) || history.startBlock < 0 ||
+        !Number.isSafeInteger(history.chainId) || history.chainId <= 0)) {
       throw new Error('Verified creation history is required before generating indexer config')
     }
     services.push({
       service: 'RawEventsGatherer',
       config: {
-        chainId: history.chainId,
+        chainId: history?.chainId ?? net.l2ChainId,
         rpcUrl: '${L2_RPC_URL}',
-        startBlock: history.startBlock,
+        ...(history ? { startBlock: history.startBlock } : {}),
       }
     })
     services.push({

@@ -23,8 +23,8 @@ function generator(extra={}){
  Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars};',ctx);
  return {api:ctx.api,writes:()=>writes};
 }
-test('real service generator requires history and preserves selected chain and zero',()=>{
- const f=generator();assert.throws(()=>f.api.buildServiceList('validator',{}),/Verified creation/);
+test('service topology allows absent history but validates supplied history',()=>{
+ const f=generator();assert.ok(!Object.hasOwn(f.api.buildServiceList('validator',{}).find(x=>x.service==='RawEventsGatherer').config,'startBlock'));assert.throws(()=>f.api.buildServiceList('validator',{}, {chainId:1,startBlock:-1}),/Verified creation/);
  const services=f.api.buildServiceList('validator',{}, {chainId:421614,startBlock:0});
  const scanner=services.find(x=>x.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,421614);assert.equal(scanner.config.startBlock,0);
 });
@@ -96,3 +96,19 @@ test('full generator keeps alternate chain, environment and address output consi
 test('full generator missing receipt produces no output files',()=>fullInstall('L2',84532,40245,{missingReceipt:true}));
 
 test('full generator cannot report success when network recheck fails',()=>fullInstall('L2',84532,40245,{secondReadFails:true}));
+
+test('all diagnostic node types build without inventing a history floor',()=>{
+ const g=generator();for(const type of ['full','frontend-api','api-only','validator','frontend-only']){
+ const services=g.api.buildServiceList(type,{});const scan=services.find(x=>x.service==='RawEventsGatherer');if(scan)assert.ok(!Object.hasOwn(scan.config,'startBlock'));
+ }
+});
+test('actual service drift identifies missing services without history acquisition',()=>{
+ const g=generator();const config={network:'testnet',networkId:1};
+ const installed=g.api.buildServiceList('full',config).filter(s=>!['DepositWatcher','StakeLedgerReconciler'].includes(s.service));
+ const src=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/serviceDrift.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
+ let writes=0;const ctx={path,buildServiceList:g.api.buildServiceList,console:{log(){}},success:x=>x,warn:x=>x,dim:x=>x,brand:x=>x,
+ fs:{existsSync:()=>true,readFileSync:p=>p.endsWith('.env')?'L1_CHAIN_ID=11155111\nNETWORK_ID=1\n':JSON.stringify(installed),writeFileSync(){writes++;}}};
+ vm.createContext(ctx);vm.runInContext(src+'\nglobalThis.api={inferNodeType,diffServices,reportServiceDrift};',ctx);
+ const diff=ctx.api.diffServices(installed,config);assert.equal(diff.nodeType,'full');assert.deepEqual(Array.from(diff.missing,x=>x.service).sort(),['DepositWatcher','StakeLedgerReconciler']);
+ ctx.api.reportServiceDrift('/synthetic');assert.equal(writes,0);
+});

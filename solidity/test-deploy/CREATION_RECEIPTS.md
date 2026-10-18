@@ -71,3 +71,10 @@ These RPC consistency checks do not establish consensus finality, code identity 
 
 
 Full-generator regression coverage now includes default and alternate storage chains, consistent scanner/environment/address output, no output on missing creation receipts, and a failed second network read. A failed recheck marks installation incomplete rather than silently skipping addresses. Earlier files can already have been written when that late check fails: do not start services; review the RPC and rerun. This is not an atomic-install guarantee. Tests use filesystem/provider doubles, not a live interactive install.
+
+
+### Diagnostics compatibility and rollout gate
+
+`buildServiceList` remains a topology helper: doctor/update drift checks and regeneration may call it without history. In that case it emits no startBlock and never reads legacy state. Invalid supplied history still rejects. Fresh `generateConfig` continues to require verified receipts before writing files. Topology generation is not proof that an indexer has a valid history floor; retain the explicit-floor startup protection from PR #329.
+
+No recovered creation manifest for the committed testnet generation is included in this branch. Merging this therefore blocks new indexer-bearing installations until a reviewed manifest is committed or supplied through CAW_CREATION_MANIFEST. A redeploy of unrelated contracts does not recover missing CawActions creation receipts. This rollout gate needs explicit review; do not treat passing tests as resolution.
