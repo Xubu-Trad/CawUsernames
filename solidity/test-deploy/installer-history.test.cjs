@@ -54,3 +54,45 @@ export const lzEids = {
  const h=await g.api.prepareHistoryFloor({l1RpcUrl:'l1',l2RpcUrl:'storage'},'/synthetic');assert.equal(h.startBlock,0);assert.equal(destroyed,2);
  storage.send=async()=> '0x1';await assert.rejects(g.api.prepareHistoryFloor({l1RpcUrl:'l1',l2RpcUrl:'storage'},'/synthetic'),/History verification failed/);assert.equal(destroyed,4);
 });
+
+async function fullInstall(role,chainId,eid,{missingReceipt=false,secondReadFails=false}={}) {
+ const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0,networkReads=0;
+ f.manifest.contracts={['CawActions_'+role]:{...f.manifest.contracts.CawActions_L2,chainId}};
+ if(missingReceipt)f.manifest.contracts={};
+ const txt=`export const deployments = {
+  testnet: {
+    L1: { CawNetworkManager: '${other}'
+    },
+    ${role}: { CawActions: '${address}', CawProfileLedger: '${other}'
+    },
+  },
+}
+export const lzEids = {
+  testnet: { L1: 40161, ${role}: ${eid},
+  },
+}`;
+ const files=new Map(),writes=[];const key=p=>path.normalize(p);
+ const fakeFs={existsSync:p=>files.has(key(p)),writeFileSync:(p,data)=>{writes.push(key(p));files.set(key(p),data);},chmodSync(){},appendFileSync:(p,data)=>files.set(key(p),(files.get(key(p))||'')+data),readFileSync:p=>{
+ if(p.endsWith('deployments.ts'))return txt;
+ if(p.includes('creation-receipts.'))return JSON.stringify(f.manifest);
+ if(!files.has(key(p)))throw Error('missing synthetic file');return files.get(key(p));
+ }};
+ const storage={...f.provider,send:async()=> '0x'+chainId.toString(16),getTransaction:async()=>({...await f.provider.getTransaction(),chainId:BigInt(chainId)}),destroy(){destroyed++;}};
+ const l1={send:async()=> '0xaa36a7',destroy(){destroyed++;}};
+ const g=generator({resolveHistoryFloor,fs:fakeFs,crypto:require('node:crypto'),console:{log(){}},success:x=>x,dim:x=>x,warn:x=>x,brand:x=>x,
+ makeProvider:(_e,url)=>url==='l1'?l1:storage,injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>{networkReads++;if(secondReadFails&&networkReads===2)throw Error('private RPC detail');return eid;}};}}})});
+ const config={network:'testnet',networkId:1,l1RpcUrl:'l1',l2RpcUrl:'storage'};
+ if(missingReceipt){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/History verification failed/);assert.equal(writes.length,0);return;}
+ if(secondReadFails){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,3);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
+ await g.api.generateConfig('validator',config,'/synthetic');
+ const services=JSON.parse(files.get(key('/synthetic/client/config.json')));
+ const scanner=services.find(s=>s.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,chainId);assert.equal(scanner.config.startBlock,0);
+ assert.match(files.get(key('/synthetic/client/.env')),new RegExp('L2_CHAIN_ID='+chainId+'(?:\\r?\\n|$)'));
+ assert.ok(files.get(key('/synthetic/client/src/abi/addresses.ts')).includes(address));
+ assert.ok(files.has(key('/synthetic/ecosystem.config.cjs')));assert.equal(destroyed,3);
+}
+test('full generator keeps default chain, environment and address output consistent',()=>fullInstall('L2',84532,40245));
+test('full generator keeps alternate chain, environment and address output consistent',()=>fullInstall('L2b',421614,40231));
+test('full generator missing receipt produces no output files',()=>fullInstall('L2',84532,40245,{missingReceipt:true}));
+
+test('full generator cannot report success when network recheck fails',()=>fullInstall('L2',84532,40245,{secondReadFails:true}));

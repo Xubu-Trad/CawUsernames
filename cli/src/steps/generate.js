@@ -164,6 +164,7 @@ export async function writeAddressesForNetwork(config, clientDir, history) {
   try {
     eid = Number(await cnm.getStorageChainEid(networkId))
   } catch (e) {
+    if (history) throw new Error('Network storage selection could not be rechecked; installation incomplete. Do not start services; review RPC and rerun.')
     console.log(dim(`  Couldn't read storageChainEid for Network ${networkId} from L1: ${e.message?.slice(0, 80)}`))
     console.log(dim('  Skipping addresses.ts — verify the Network exists on-chain and rerun.'))
     return
