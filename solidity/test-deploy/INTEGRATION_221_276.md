@@ -30,3 +30,12 @@ this branch does not update either upstream pr head or establish release approva
 Supply the verified ethers UMD bundle and the solc output compiled from `integration-solc-input.json` as the two script arguments. The ethers tarball is verified against the repository lockfile integrity before extracting its bundle. Bundle SHA-256: `9a85a5aa81305f85e6546452fd2093a8a68932bed3cec4f6491e4d031a90bc95`. Local execution retains the existing memory and process guards; Anvil is stopped afterward.
 
 This checks the individual function with genuine local RPC and ABI decoding. It does not execute the complete wiring verifier, a production endpoint, or a multichain deployment. The initial harness run exposed receipt availability timing; bounded receipt polling was added before the passing run.
+
+
+### Required minter authority verification
+
+Includes the verifier-only fix from PR #332 (`da429fa64932cf9250d2f5ce2e5b8433b6b0a973`). An unreadable minter authority now fails verification. The unused profile ABI entry and misleading header claim are removed: the current minter has no public profile getter, and profile-binding verification remains open.
+
+Combined validation: 164/164 tests pass (124 deployment-runner, 25 finalization-function, 11 library-function and 4 complete-script minter tests). These use mocked boundaries. The separate real-ABI/local-Anvil finalization check passes again: 12 checks for genuine finalization; an unrelated successful transfer is rejected on four action-binding checks. Syntax passes. Local services were stopped afterward. Full multichain and production endpoint verification remain open.
+
+From `solidity`, run `node --test test-deploy/sealed-wiring.test.cjs test-deploy/finalization-verifier.test.cjs test-deploy/library-verifier.test.cjs test-deploy/minter-verifier.test.cjs`. Local validation used serial execution and existing process and memory guards.
