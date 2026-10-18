@@ -12,7 +12,6 @@
  *     CawProfile.networkManager   == CawNetworkManager
  *     CawProfile.uriGenerator     == CawProfileURI
  *     CawNetworkManager.cawProfile == CawProfile
- *     CawProfileMinter.CawProfile == CawProfile
  *     CawProfileMinter.pathwayExpander == PathwayExpander_L1
  *     CawProfileLedger_L1.cawProfile     == CawProfile
  *     CawProfileLedger_L1.cawActions     == CawActions_L1
@@ -167,15 +166,12 @@ async function main() {
   // CawProfileMinter state
   console.log('\nCawProfileMinter:');
   const minter = new ethers.Contract(A.CawProfileMinter, [
-    'function CawProfile() view returns (address)',
     'function pathwayExpander() view returns (address)',
   ], l1);
-  // The IMint cast inside Minter exposes the slot, but the public getter is named after the var declaration.
-  try {
-    eq('CawProfileMinter.pathwayExpander', await minter.pathwayExpander(), A.PathwayExpander_L1);
-  } catch (e) {
-    warn('CawProfileMinter.pathwayExpander', 'not callable (getter may be missing)');
-  }
+  // The immutable authority has a required public getter. A failed read
+  // must fail verification rather than turn unknown authority into a warning.
+  // CawProfile is internal in the current minter; no profile getter is assumed.
+  eq('CawProfileMinter.pathwayExpander', await minter.pathwayExpander(), A.PathwayExpander_L1);
 
   // CawProfileLedger_L1 (bypassLZ)
   console.log('\nCawProfileLedger_L1 (bypassLZ):');
