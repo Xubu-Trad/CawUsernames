@@ -1,3 +1,4 @@
+import { resolveHistoryFloor } from './history-floor.mjs'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -30,7 +31,10 @@ export async function generateConfig(nodeType, config, installDir) {
   const clientDir = path.join(installDir, 'client')
 
   // Build config.json (services to run)
-  const services = buildServiceList(nodeType, config)
+  const needsHistory = ['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)
+  // Resolve and verify before writing config or secrets. Unknown history is not head.
+  const history = needsHistory ? await prepareHistoryFloor(config, clientDir) : undefined
+  const services = buildServiceList(nodeType, config, history)
   const configJsonPath = path.join(clientDir, 'config.json')
   fs.writeFileSync(configJsonPath, JSON.stringify(services, null, 2) + '\n')
   console.log(success(`  Created ${dim(configJsonPath)}`))
@@ -42,7 +46,7 @@ export async function generateConfig(nodeType, config, installDir) {
   // initial write covers fresh installs; existing files we explicitly
   // chmod afterward (writeFileSync's mode option is ignored for files
   // that already exist — Node's documented behavior).
-  const envVars = buildEnvVars(nodeType, config)
+  const envVars = buildEnvVars(nodeType, config, history)
   const envPath = path.join(clientDir, '.env')
   const envContent = Object.entries(envVars)
     .map(([key, value]) => `${key}=${value}`)
@@ -98,7 +102,7 @@ export async function generateConfig(nodeType, config, installDir) {
   // API node (the static repo file works for those, since they don't run
   // the validator/indexer that need per-chain addresses to be exact).
   if (['full', 'frontend-api', 'api-only', 'validator'].includes(nodeType)) {
-    await writeAddressesForNetwork(config, clientDir)
+    await writeAddressesForNetwork(config, clientDir, history)
   }
 
   return { configJsonPath, envPath }
@@ -110,7 +114,7 @@ export async function generateConfig(nodeType, config, installDir) {
  * addresses.ts. The rest of the codebase imports singular constants from
  * addresses.ts and stays multi-chain-unaware.
  */
-export async function writeAddressesForNetwork(config, clientDir) {
+export async function writeAddressesForNetwork(config, clientDir, history) {
   const env = config.network || 'testnet'
   const networkId = Number(config.networkId || 1)
   const l1RpcUrl = config.l1RpcUrlHttp || config.l1RpcUrl
@@ -174,6 +178,9 @@ export async function writeAddressesForNetwork(config, clientDir) {
 
   const l1 = envBlock.L1 || {}
   const l2 = envBlock[chainKey] || {}
+  if (history && (history.chainKey !== chainKey || history.actions.toLowerCase() !== l2.CawActions?.toLowerCase())) {
+    throw new Error('Network storage selection changed during install; review and rerun before starting services')
+  }
   // Singular constants the codebase reads. Keys here mirror what was in the
   // hand-edited addresses.ts.
   const consts = {
@@ -287,6 +294,7 @@ export async function writeAddressesForNetwork(config, clientDir) {
  * just the bits we need with regex. Trades cleverness for portability.
  */
 function parseDeploymentsBlock(txt) {
+  txt = txt.split('export const lzEids')[0]
   // Match each `<env>: { ... }` block.
   const result = {}
   const envRegex = /(testnet|mainnet|dev): \{([\s\S]*?)\n  \},/g
@@ -331,7 +339,7 @@ function parseLzEids(txt) {
   return result
 }
 
-export function buildServiceList(nodeType, config) {
+export function buildServiceList(nodeType, config, history) {
   const services = []
   const net = NETWORKS[config.network || 'testnet']
   // Node groupings — keep these in one place so future tweaks don't need
@@ -389,32 +397,16 @@ export function buildServiceList(nodeType, config) {
   }
 
   if (RUNS_INDEXER) {
-    // Read l2DeployBlock from solidity/.deploy-state.json so RawEventsGatherer
-    // backfills from the right L2 block on a fresh DB. Without this, the
-    // gatherer falls back to "current head" and silently misses every
-    // historical event for this Network.
-    //
-    // Failure modes are non-fatal: a missing / malformed deploy-state file
-    // just means we don't write startBlock and the gatherer stays at
-    // current-head behavior (the same default as today). Operators can
-    // also override START_BLOCK in client/.env for backfill repair.
-    const deployStatePath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../solidity/.deploy-state.json')
-    let l2DeployBlock
-    try {
-      const ds = JSON.parse(fs.readFileSync(deployStatePath, 'utf8'))
-      if (typeof ds?.l2DeployBlock === 'number' && ds.l2DeployBlock > 0) {
-        l2DeployBlock = ds.l2DeployBlock
-      }
-    } catch {
-      // .deploy-state.json missing on a contributor checkout that didn't
-      // run the deploy script — fine, just skip startBlock.
+    if (!history || !Number.isSafeInteger(history.startBlock) || history.startBlock < 0 ||
+        !Number.isSafeInteger(history.chainId) || history.chainId <= 0) {
+      throw new Error('Verified creation history is required before generating indexer config')
     }
     services.push({
       service: 'RawEventsGatherer',
       config: {
-        chainId: net.l2ChainId,
+        chainId: history.chainId,
         rpcUrl: '${L2_RPC_URL}',
-        ...(l2DeployBlock ? { startBlock: l2DeployBlock } : {}),
+        startBlock: history.startBlock,
       }
     })
     services.push({
@@ -447,7 +439,7 @@ export function buildServiceList(nodeType, config) {
   return services
 }
 
-function buildEnvVars(nodeType, config) {
+function buildEnvVars(nodeType, config, history) {
   const env = {}
   const net = NETWORKS[config.network || 'testnet']
 
@@ -598,7 +590,7 @@ function buildEnvVars(nodeType, config) {
     env.PRISMA_QUERY_ENGINE_TYPE = process.env.CAW_PRISMA_QUERY_ENGINE_TYPE
   }
 
-  env.L2_CHAIN_ID = String(net.l2ChainId)
+  env.L2_CHAIN_ID = String(history?.chainId ?? net.l2ChainId)
   env.L1_CHAIN_ID = String(net.l1ChainId)
   env.NETWORK = config.network || 'testnet'
 
@@ -952,4 +944,43 @@ function buildPm2Config(nodeType, config, installDir) {
   }
 
   return { apps }
+}
+
+// The installer must not copy an unbound value from private deployment state.
+async function prepareHistoryFloor(config, clientDir) {
+  const environment = config.network || 'testnet'
+  const network = NETWORKS[environment]
+  const networkId = Number(config.networkId || 1)
+  if (!network || !Number.isSafeInteger(networkId) || networkId <= 0 || networkId > 0xffffffff) {
+    throw new Error('Invalid history network selection')
+  }
+  const l1Url = config.l1RpcUrlHttp || config.l1RpcUrl
+  const storageUrl = config.l2RpcUrlHttp || config.l2RpcUrl
+  if (!l1Url || !storageUrl) throw new Error('L1 and selected storage-chain RPC are required for history verification')
+  const { ethers } = await import('ethers')
+  const l1 = makeProvider(ethers, l1Url, config.l1RpcSecret)
+  const storage = makeProvider(ethers, storageUrl, config.l2RpcSecret)
+  try {
+    if (BigInt(await l1.send('eth_chainId', [])) !== BigInt(network.l1ChainId)) throw new Error('Wrong L1 chain')
+    const txt = fs.readFileSync(path.join(clientDir, 'src/abi/deployments.ts'), 'utf8')
+    const deployments = parseDeploymentsBlock(txt)[environment] || {}
+    const eids = parseLzEids(txt)[environment] || {}
+    const manager = new ethers.Contract(deployments.L1?.CawNetworkManager,
+      ['function getStorageChainEid(uint32) view returns (uint32)'], l1)
+    const eid = Number(await manager.getStorageChainEid(networkId))
+    const matches = Object.keys(eids).filter(k => eids[k] === eid)
+    if (matches.length !== 1) throw new Error('Unknown or ambiguous storage chain')
+    const chainKey = matches[0]
+    const chains = environment === 'mainnet' ? { L1: 1, L2: 8453, L2b: 42161 } : { L1: 11155111, L2: 84532, L2b: 421614 }
+    const chainId = chains[chainKey]
+    if (!chainId || BigInt(await storage.send('eth_chainId', [])) !== BigInt(chainId)) throw new Error('Wrong storage RPC chain')
+    const manifestPath = process.env.CAW_CREATION_MANIFEST || path.join(clientDir, 'src/abi', `creation-receipts.${environment}.json`)
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    return await resolveHistoryFloor({ environment, chainKey, chainId, addresses: deployments[chainKey], manifest, provider: storage })
+  } catch {
+    throw new Error('History verification failed. Supply reviewed creation receipts for the selected deployment with CAW_CREATION_MANIFEST and a matching storage RPC, then rerun. No current-head or legacy-floor fallback is used.')
+  } finally {
+    l1.destroy?.()
+    storage.destroy?.()
+  }
 }

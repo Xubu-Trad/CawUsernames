@@ -57,3 +57,14 @@ node --check solidity/scripts/deploy.js
 Tests use contract/provider doubles and the actual deployment methods. They cover incorrect identity/inclusion, reorganized block observations, interrupted-run recovery without another creation, generation mismatch, public-field export and chain-specific floor selection. They are not EVM deployment tests.
 
 The deploy.js hunks overlap PR #221's receipt/finalization work and need reconciliation if that PR merges first. Keep its PathwayExpander finalization proofs separate from these creation records.
+
+
+## Installer migration and receipt-less recovery
+
+Indexer-bearing installs now resolve the selected network's storage EID from its L1 network manager before writing configuration. The selected storage RPC must report the corresponding chain. The public receipt manifest must match the environment, selected CawActions address and chain; if an ERC-1271 sibling is present in that deployment, its receipt is required too. The floor is the earliest verified creation block, including zero. Both scanner chainId and backend L2_CHAIN_ID use the selected chain.
+
+The default manifest is client/src/abi/creation-receipts.<environment>.json in the selected install. Set CAW_CREATION_MANIFEST to an explicit local manifest path for recovery. No private .deploy-state.json value or sampled current head is copied into the new config.
+
+For an existing receipt-less deployment, preserve the old config and database. Recover each indexed contract's actual creation transaction independently, then populate a schemaVersion 1 manifest with environment and contracts entries keyed CawActions_<role> and, where present, CawActionsERC1271_<role>. Each entry requires chainId, contractAddress, transactionHash, blockNumber, blockHash and transactionIndex. Verify each record using verify-creation-receipt.js above and the reviewed expected chain/address. Set CAW_CREATION_MANIFEST to that file and rerun installation against matching RPCs. If the creation transaction or its historical receipt is unavailable, installation stops; do not fabricate a receipt or substitute the old 45547765 value. No on-chain recovery transactions are sent by these checks.
+
+These RPC consistency checks do not establish consensus finality, code identity or complete event history. Generated config is not automatically a repaired database. Provider-backed preparation, manifest rejection, block zero, service chain selection and early failure are covered by dependency-double tests; a complete interactive install with real RPC/database services remains a review gate.
