@@ -1,5 +1,13 @@
 # CLI command smoke checks
 
+## current publication boundary — staged replacement withdrawn
+
+production configuration output no longer imports the experimental staged publisher. on non-Windows platforms, it writes outputs sequentially in place after the existing plan/preflight checks. Windows still refuses before filesystem access. the staged core remains isolated for regression research; earlier staging results below are historical, not the current production path.
+
+103 regression checks and nine loopback RPC cases pass on Windows with Node 24.20.0 under the existing resource limits. three new source/IO-double checks exercise the non-Windows wrapper: in-place output without rename, stop after a write failure, and stop after failed readback. these are not native Linux Node integration. the valid-history Windows generator case verifies refusal with no outputs, not a successful installation.
+
+this withdraws the replacement mechanism demonstrated to lose extended access rules. it does not prove universal permission preservation: chmod can affect a POSIX ACL mask; interrupted writes can leave partial files, and races remain. errors report completed writes and possible partial output without exposing the underlying filesystem error. crash recovery, native Linux integration and complete installation remain open gates.
+
 source: receipt-provenance branch at `a467dfe28e43e8896af329381f128b5e950164db`; Node 24.20.0 on Windows. the CLI files from baseline `97cd13f3` were overlaid with this branch's changed CLI files and receipt-verification modules.
 
 76 dependencies were acquired at the CLI lockfile's exact registry URLs and verified against its integrity fields. no npm lifecycle scripts ran. archives were extracted into their lockfile paths in an isolated directory; this was not an npm-ci installation or bin-link validation. CLI lock SHA-256: `b6788fc18b501245d872fd9165e8103baac299fec9c9ec69ad625a417a00e2a9`.

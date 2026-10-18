@@ -1,3 +1,4 @@
+import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -77,3 +78,22 @@ test('Windows refusal preserves existing files and creates no stage files', {ski
  assert.throws(()=>publishSupportedOutputs(outputs),/unavailable on Windows/);
  assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');noStage(dir);
 }));
+
+function nonWindowsPublisher(io){
+ const source=fs.readFileSync(new URL('../../cli/src/steps/config-output.mjs',import.meta.url),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
+ const ctx={fs:io,process:{platform:'linux'}};vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.publish=publishConfigOutputs',ctx);return ctx.publish;
+}
+test('non-Windows production path writes in place without invoking staged replacement',()=>{
+ const writes=[],modes=[],verified=[];
+ const io={writeFileSync:(...args)=>writes.push(args),chmodSync:(...args)=>modes.push(args),renameSync:()=>{throw Error('replacement reached');}};
+ nonWindowsPublisher(io)([{file:'synthetic-a',content:'a',mode:0o600,verify:file=>verified.push(file)},{file:'synthetic-b',content:'b'}]);
+ assert.equal(writes.length,2);assert.deepEqual(modes,[['synthetic-a',0o600]]);assert.deepEqual(verified,['synthetic-a']);
+});
+test('non-Windows write failure stops later outputs and reports possible partial file',()=>{
+ let calls=0;const io={writeFileSync(){if(++calls===2)throw Error('private path');}};
+ assert.throws(()=>nonWindowsPublisher(io)([{file:'a',content:'a'},{file:'b',content:'b'},{file:'c',content:'c'}]),e=>{assert.match(e.message,/1 completed write/);assert.match(e.message,/failing file may also be partial/);assert.doesNotMatch(e.message,/private path/);return true;});assert.equal(calls,2);
+});
+test('non-Windows readback failure prevents later writes',()=>{
+ let calls=0;const io={writeFileSync(){calls++;}};
+ assert.throws(()=>nonWindowsPublisher(io)([{file:'a',content:'a',verify(){throw Error('bad readback');}},{file:'b',content:'b'}]),/Installation incomplete/);assert.equal(calls,1);
+});
