@@ -119,6 +119,7 @@ export async function writeAddressesForNetwork(config, clientDir, history) {
   const networkId = Number(config.networkId || 1)
   const l1RpcUrl = config.l1RpcUrlHttp || config.l1RpcUrl
   if (!l1RpcUrl) {
+    if (history) throw new Error('L1 RPC is missing during address generation; installation incomplete. Do not start services; review and rerun.')
     console.log(dim('  Skipping addresses.ts (no L1 RPC) — fill in client/src/abi/addresses.ts manually.'))
     return
   }
@@ -148,6 +149,7 @@ export async function writeAddressesForNetwork(config, clientDir, history) {
   const envBlock = deployments[env] || {}
   const cnmAddr = envBlock.L1?.CawNetworkManager
   if (!cnmAddr) {
+    if (history) throw new Error('Network manager metadata is missing during address generation; installation incomplete. Do not start services; review and rerun.')
     console.log(dim(`  Skipping addresses.ts (no CawNetworkManager in deployments[${env}].L1).`))
     return
   }
@@ -173,6 +175,7 @@ export async function writeAddressesForNetwork(config, clientDir, history) {
   }
   const chainKey = chainKeyForEid(env, eid)
   if (!chainKey) {
+    if (history) throw new Error('Network storage chain is unknown during address generation; installation incomplete. Do not start services; review and rerun.')
     console.log(dim(`  Network ${networkId} reports storage eid ${eid}, no matching chain in deployments[${env}].`))
     return
   }

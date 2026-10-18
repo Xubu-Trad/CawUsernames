@@ -20,7 +20,7 @@ for(const [label,change] of Object.entries({
 function generator(extra={}){
  const source=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/generate.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'').replace(/await import\('ethers'\)/g,'await injectedImport()');
  let writes=0;const ctx={path,fs:{writeFileSync(){writes++;}},process:{env:{}},section(){},resolveHistoryFloor(){throw Error('not reached');}};
- Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars};',ctx);
+ Object.assign(ctx,extra);vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork};',ctx);
  return {api:ctx.api,writes:()=>writes};
 }
 test('service topology allows absent history but validates supplied history',()=>{
@@ -55,8 +55,8 @@ export const lzEids = {
  storage.send=async()=> '0x1';await assert.rejects(g.api.prepareHistoryFloor({l1RpcUrl:'l1',l2RpcUrl:'storage'},'/synthetic'),/History verification failed/);assert.equal(destroyed,4);
 });
 
-async function fullInstall(role,chainId,eid,{missingReceipt=false,secondReadFails=false}={}) {
- const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0,networkReads=0;
+async function fullInstall(role,chainId,eid,{missingReceipt=false,secondReadFails=false,missingManager=false,unknownChain=false}={}) {
+ const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0,networkReads=0,deploymentReads=0;
  f.manifest.contracts={['CawActions_'+role]:{...f.manifest.contracts.CawActions_L2,chainId}};
  if(missingReceipt)f.manifest.contracts={};
  const txt=`export const deployments = {
@@ -73,17 +73,17 @@ export const lzEids = {
 }`;
  const files=new Map(),writes=[];const key=p=>path.normalize(p);
  const fakeFs={existsSync:p=>files.has(key(p)),writeFileSync:(p,data)=>{writes.push(key(p));files.set(key(p),data);},chmodSync(){},appendFileSync:(p,data)=>files.set(key(p),(files.get(key(p))||'')+data),readFileSync:p=>{
- if(p.endsWith('deployments.ts'))return txt;
+ if(p.endsWith('deployments.ts')){deploymentReads++;return missingManager&&deploymentReads>1?txt.replace('CawNetworkManager:', 'MissingManager:'):txt;}
  if(p.includes('creation-receipts.'))return JSON.stringify(f.manifest);
  if(!files.has(key(p)))throw Error('missing synthetic file');return files.get(key(p));
  }};
  const storage={...f.provider,send:async()=> '0x'+chainId.toString(16),getTransaction:async()=>({...await f.provider.getTransaction(),chainId:BigInt(chainId)}),destroy(){destroyed++;}};
  const l1={send:async()=> '0xaa36a7',destroy(){destroyed++;}};
  const g=generator({resolveHistoryFloor,fs:fakeFs,crypto:require('node:crypto'),console:{log(){}},success:x=>x,dim:x=>x,warn:x=>x,brand:x=>x,
- makeProvider:(_e,url)=>url==='l1'?l1:storage,injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>{networkReads++;if(secondReadFails&&networkReads===2)throw Error('private RPC detail');return eid;}};}}})});
+ makeProvider:(_e,url)=>url==='l1'?l1:storage,injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>{networkReads++;if(secondReadFails&&networkReads===2)throw Error('private RPC detail');return unknownChain&&networkReads===2?99999:eid;}};}}})});
  const config={network:'testnet',networkId:1,l1RpcUrl:'l1',l2RpcUrl:'storage'};
  if(missingReceipt){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/History verification failed/);assert.equal(writes.length,0);return;}
- if(secondReadFails){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,3);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
+ if(secondReadFails||missingManager||unknownChain){await assert.rejects(g.api.generateConfig('validator',config,'/synthetic'),/installation incomplete/);assert.equal(destroyed,missingManager?2:3);assert.ok(!files.has(key('/synthetic/client/src/abi/addresses.ts')));return;}
  await g.api.generateConfig('validator',config,'/synthetic');
  const services=JSON.parse(files.get(key('/synthetic/client/config.json')));
  const scanner=services.find(s=>s.service==='RawEventsGatherer');assert.equal(scanner.config.chainId,chainId);assert.equal(scanner.config.startBlock,0);
@@ -111,4 +111,15 @@ test('actual service drift identifies missing services without history acquisiti
  vm.createContext(ctx);vm.runInContext(src+'\nglobalThis.api={inferNodeType,diffServices,reportServiceDrift};',ctx);
  const diff=ctx.api.diffServices(installed,config);assert.equal(diff.nodeType,'full');assert.deepEqual(Array.from(diff.missing,x=>x.service).sort(),['DepositWatcher','StakeLedgerReconciler']);
  ctx.api.reportServiceDrift('/synthetic');assert.equal(writes,0);
+});
+
+
+test('full generator rejects missing manager metadata on final address pass',()=>fullInstall('L2',84532,40245,{missingManager:true}));
+test('full generator rejects unknown storage chain on final address pass',()=>fullInstall('L2',84532,40245,{unknownChain:true}));
+test('verified address generation rejects missing RPC without writes',async()=>{
+ const g=generator({console:{log(){}},dim:x=>x});
+ await assert.rejects(g.api.writeAddressesForNetwork({},'/synthetic',{chainKey:'L2',actions:address}),/installation incomplete/);
+ assert.equal(g.writes(),0);
+ await g.api.writeAddressesForNetwork({},'/synthetic');
+ assert.equal(g.writes(),0);
 });
