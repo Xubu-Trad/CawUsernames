@@ -81,3 +81,18 @@ target snapshots now compare device/inode, owner/group and hard-link count as we
 98 regressions and nine transport/generation cases pass. the added filesystem case replaces a target with another same-byte file and confirms zero publication; three other cases inject changed uid/gid/link-count metadata and confirm rejection. removing the new identity comparisons produces four failures with the other 94 passing. these are local consistency checks, not ownership preservation. owner/group/link-count tests use injected metadata; the same-byte replacement uses actual files.
 
 check/rename races and changing parent directories remain possible. Windows ACLs are not compared; replacement may change ACL/ownership semantics. no lock, rollback or durable recovery has been added.
+
+## merge blocker: protected Windows ACL is not preserved
+
+an isolated Windows fixture at source head 5f0095984785f430a7d9849d4e9c9fcc5a361d03 demonstrates permission loss through the staged replacement path. a synthetic env file was given an explicit current-user access rule with inherited rules disabled. the actual publishConfigOutputs helper then replaced it with synthetic content using mode 0600. command exit was zero and content replacement succeeded.
+
+| observation | before | after |
+|---|---|---|
+| access rules protected from inheritance | true | false |
+| security descriptor equal to original | reference | false |
+
+this establishes a Windows permission-preservation defect. it does not establish which other principals gained access on every installation. local security descriptors and user identifiers are retained privately and are not included here. no real env file, credential or installation was modified.
+
+reproduction outline: create a disposable directory and synthetic file; use Get-Acl/Set-Acl to disable inheritance and set a current-user-only allow rule; record AreAccessRulesProtected and Sddl; call publishConfigOutputs for that file with synthetic content and mode0600; inspect those two properties again. retain the existing test resource guards.
+
+**do not merge the staged-replacement portion as permission-safe or use it on real Windows secret files.** it needs ACL-aware preservation with independent verification, or a supported-platform rejection that fails before mutation. POSIX ownership/extended ACL behavior also remains unverified. this finding narrows the earlier successful smoke results: bytes and rejection behavior passed; permission preservation did not.
