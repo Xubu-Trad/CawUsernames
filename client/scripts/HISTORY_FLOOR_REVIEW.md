@@ -6,7 +6,7 @@ The listener now rejects missing, negative, fractional, nonnumeric or unsafe-int
 
 ## Upgrade requirement
 
-Before restarting, set a reviewed startBlock for the selected chain/deployment, or supply its reviewed Network.creationBlock. Installations that depended on implicit current-head or checkpoint-only startup will now stop. Do not choose today's head merely to suppress the error. Recover the relevant creation record and verify chain, address and inclusion, then review the earliest required block for all indexed contracts (including any ERC-1271 sibling).
+Before restarting, set a reviewed startBlock for the selected chain/deployment, or supply its reviewed Network.creationBlock. Installations that depended on implicit current-head or checkpoint-only startup will now reject indexer startup. The enclosing node process can remain running: runServices retries start with a growing delay capped at 30 seconds and logs each failure. A live process therefore does not establish that indexing is running. Do not choose today's head merely to suppress the error. Recover the relevant creation record and verify chain, address and inclusion, then review the earliest required block for all indexed contracts (including any ERC-1271 sibling).
 
 Keep the database and original configuration intact. This change neither clears partial history nor repairs it automatically. Review existing floor-filled markers before a deliberate historical rebuild; they are not generation-bound by this patch. An operator can still explicitly configure an incorrect or too-recent floor. A valid integer is not proof of complete history.
 
@@ -23,3 +23,9 @@ The tests exercise actual scanner selection code, the complete scanner's early r
 Separate remaining work: installer consumption of chain/address-bound public receipt metadata; generation-scoped floor-filled markers; independent complete historical acquisition and reorganization handling. This patch changes no contract, fees, deployment or chain state.
 
 Based on upstream 97cd13f3a1423f702d411472fdd2b2a2e7bfbd59. Review integration with scanner polling PR #277 and adaptive-range PR #242; this change addresses startup-floor selection rather than RPC range sizing or live catch-up.
+
+## installer integration dependency
+
+At base `97cd13f3`, `cli/src/steps/generate.js` copies `l2DeployBlock` from the committed deployment state into a new indexer configuration. PR #328 removes that compatibility value when it has no matching creation receipt. With both patches and no separately configured floor, startup then depends on a reviewed `Network.creationBlock` (written by ChainSync's `handleNetworkCreated`). If neither exists, indexing remains stopped while the supervisor retries.
+
+Do not land the combined installation path as operationally complete until the installer consumes chain/address-bound receipt metadata and operators have a recovery path for existing receipt-less state. Retaining an unverified legacy number as authoritative would conceal the missing provenance. This is an integration gate, not an assertion that the installer migration is implemented.
