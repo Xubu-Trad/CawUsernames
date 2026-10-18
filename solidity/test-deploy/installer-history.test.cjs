@@ -169,3 +169,37 @@ test('actual regen-config adds ordinary services without changing existing scann
  const r=await regenFixture({missingScanner:false});assert.equal(r.writes,1);assert.equal(r.copies,1);
  assert.deepEqual(r.output.find(s=>s.service==='RawEventsGatherer').config,{chainId:421614,startBlock:123});
 });
+
+
+function installCommandFixture(generate){
+ let callback;const calls=[],errors=[],sections=[];
+ const source=fs.readFileSync(path.join(__dirname,'../../cli/bin/caw.js'),'utf8');
+ const start=source.indexOf("  .command('install')"),end=source.indexOf('\nprogram',start);assert.ok(start>0&&end>start);
+ const program={command(){return this;},description(){return this;},option(){return this;},action(fn){callback=fn;return this;}};
+ const style=x=>x;style.bold=style;
+ const ctx={program,ROOT_DIR:'/synthetic',banner(){},console:{log(){},error:(...x)=>errors.push(x.join(' '))},dim:style,brand:style,success:style,
+ section:x=>sections.push(x),process:{exit:n=>{throw Error('exit '+n);}},
+ selectNodeType:async()=> 'validator',collectNetworkAndMode:async()=>({network:'testnet'}),setAddressesNetwork(){},
+ collectL1Rpc:async()=>({}),collectValidatorConfig:async()=>({}),collectInfraEarly:async()=>({}),chainLabels:()=>({l2:'synthetic'}),
+ collectL2Rpc:async()=>({}),collectReplicationConfig:async()=>({}),collectEmailConfig:async()=>({}),collectInfraLate:async()=>({}),collectOnboardingFeatures:async()=>({}),
+ generateConfig:async(...args)=>{calls.push('generate');return generate(...args);},
+ runInstall:async()=>calls.push('dependencies'),configureNginx:async()=>calls.push('nginx'),configureMediaNginx:async()=>calls.push('media'),startServices:async()=>calls.push('start')};
+ vm.createContext(ctx);vm.runInContext('program'+source.slice(start,end),ctx);
+ return {run:()=>callback({dir:'/synthetic'}),calls,errors,sections};
+}
+test('actual install command stops before dependencies when real generator rejects missing history RPC',async()=>{
+ const g=generator();const f=installCommandFixture(g.api.generateConfig);
+ await assert.rejects(f.run(),/exit 1/);assert.deepEqual(f.calls,['generate']);assert.equal(g.writes(),0);
+ assert.ok(f.errors.some(x=>x.includes('RPC are required')));assert.ok(!f.sections.includes('Setup Complete!'));
+});
+test('actual install command stops after late configuration failure without starting services',async()=>{
+ const f=installCommandFixture(async()=>{throw Error('installation incomplete');});
+ await assert.rejects(f.run(),/exit 1/);assert.deepEqual(f.calls,['generate']);
+ assert.ok(f.errors.some(x=>x.includes('installation incomplete')));assert.ok(!f.sections.includes('Setup Complete!'));
+});
+test('actual install command awaits successful configuration before later stages',async()=>{
+ let release,entered;const ready=new Promise(r=>entered=r);const barrier=new Promise(r=>release=r);
+ const f=installCommandFixture(async()=>{entered();await barrier;});const running=f.run();await ready;
+ assert.deepEqual(f.calls,['generate']);release();await running;
+ assert.deepEqual(f.calls,['generate','dependencies','nginx','media','start']);assert.ok(f.sections.includes('Setup Complete!'));
+});
