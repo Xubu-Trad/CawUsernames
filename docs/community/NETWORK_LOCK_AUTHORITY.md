@@ -25,4 +25,20 @@ this change corrects the renounce-equivalent description only. it does not add a
 
 ## independent review record
 
-[tentencaw reviewed head 213af9b6](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6255525806) and reports seven passing authority tests on master and that head, plus comparisons of 277 compiled artifacts after masking Solidity metadata. these are reviewer-reported results, not independently rerun here. source inspection confirms the additional withdrawFeesFor path and the sponsor event writes. reproduction source and exact build commands are requested so others can repeat the checks.
+[tentencaw reviewed head 213af9b6](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6255525806) and reports seven passing authority tests on master and that head, plus comparisons of 277 compiled artifacts after masking Solidity metadata. these are reviewer-reported results, not independently rerun here. source inspection confirms the additional withdrawFeesFor path and the sponsor event writes. [the reviewer subsequently supplied the test source and exact commands](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6264310519) and reports the same seven tests and 277-artifact comparison on `377fa67e`. the full forge build has not been rerun here. the supplied comparator is a report, not yet an automated acceptance gate: a local Linux check using two synthetic unequal bytecode artifacts printed `CODE DIFFERS` but returned exit 0. artifact-set differences also do not change its exit status by source inspection. [the requested correction](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6266353273) is to fail on code differences or unequal artifact sets. this synthetic check does not challenge or independently reproduce the reported contract build.
+
+
+## behavioral patch review gates
+
+these are proposed acceptance checks, not an adopted policy or implemented terminal state. recording them does not authorize a deployment.
+
+| decision | evidence required before accepting a behavioral patch |
+|---|---|
+| sponsor exemptions after finalization | state the chosen treatment of existing exemptions; test an existing sponsor, a revoked sponsor, an unlisted address, and a compromised former owner; prove no owner-controlled exemption path remains |
+| cross-chain gas recovery | state whether overrides freeze or a separately agreed recovery mechanism remains; test each affected selector at its existing value and cap, and messages already in flight; permissionless increases to the cap must not be treated as an agreed substitute |
+| delegated fee swaps | separate entitlement from trigger authority; show a former owner acting solely in that role cannot choose a swap's timing or minCawOut, while feeAddress retains its agreed claim and distribution is unchanged |
+| finalization transition | specify the event, permanent readback and repeat-call behavior; test both lock orderings, partial locks and already-locked networks; prove no ownership transfer, upgrade or other owner route can reactivate powers |
+| user continuity | exercise withdrawals, ordinary actions and instance registration/update under the agreed policy after finalization; include existing user balances and queued operations |
+| reproducibility | pin source, toolchain and dependencies; run the full owner-entry-point regression set; make artifact comparisons fail on differences; publish independent results and unresolved limitations |
+
+the next implementation review should link each selected policy to its tests. do not infer agreement from silence, a documentation merge, or the existing locks.
