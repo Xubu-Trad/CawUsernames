@@ -66,9 +66,9 @@ for (const value of [undefined, -1, NaN, Number.MAX_SAFE_INTEGER + 1]) {
   });
 }
 
-const callerSource = fs.readFileSync(path.join(__dirname, 'client/src/services/RawEventsGatherer/index.ts'), 'utf8');
+const callerSource = fs.readFileSync(process.env.CAW_HISTORY_PARENT_SOURCE || path.join(__dirname, 'client/src/services/RawEventsGatherer/index.ts'), 'utf8');
 const callerJS = stripTypeScriptTypes(callerSource.replace(/^import .*\r?\n/gm, '').replace('export const rawEventsGathererService', 'const rawEventsGathererService'), {mode: 'strip'});
-for (const missing of ['absent', 'database-error', 'unsafe-database-value']) {
+for (const missing of ['absent', 'database-error', 'unsafe-database-value', 'valid-l1-block']) {
   test(`parent service started promise rejects ${missing} floor`, async () => {
     let providerCalls = 0;
     const scanner = vm.runInNewContext(`(${functionJS})`, {
@@ -79,6 +79,7 @@ for (const missing of ['absent', 'database-error', 'unsafe-database-value']) {
     const chain = new Proxy({}, {get: () => () => chain});
     const prisma = {$connect: async () => {}, $disconnect: async () => {}, network: {findUnique: async () => {
       if (missing === 'database-error') throw new Error('database unavailable');
+      if (missing === 'valid-l1-block') return {creationBlock: 300n};
       return missing === 'unsafe-database-value' ? {creationBlock: BigInt(Number.MAX_SAFE_INTEGER) + 1n} : null;
     }}};
     const context = vm.createContext({
@@ -95,3 +96,20 @@ for (const missing of ['absent', 'database-error', 'unsafe-database-value']) {
     await running.stop();
   });
 }
+
+for (const floor of [0, 100]) test(`explicit indexed-chain floor ${floor} reaches listener without database fallback`, async () => {
+  let received, dbReads = 0;
+  const chain = new Proxy({}, {get: () => () => chain});
+  const context = vm.createContext({
+    z: {number: () => chain, string: () => chain, object: () => ({parse: x => x})},
+    Redis: class {}, prisma: {$connect: async () => {}, $disconnect: async () => {}, network: {findUnique: async () => {dbReads++; return {creationBlock: 300n};}}},
+    listenForRawEvents: async config => {received = config.startBlock; return {stop() {}};},
+    getRawEventsPollIntervalMs: () => 30000, getL2WsRpcUrl: () => 'http://test.invalid', getNetworkId: () => 1,
+    CAW_ACTIONS_ADDRESS: '0x' + '1'.repeat(40), CAW_ACTIONS_ERC1271_ADDRESS: null,
+    console: {log() {}, warn() {}}
+  });
+  const service = vm.runInContext(`${callerJS}\nrawEventsGathererService`, context, {timeout:1000});
+  const running = service.start({chainId:84532, rpcUrl:'http://test.invalid', startBlock:floor}, {declareLoop() {}});
+  await running.started;
+  assert.equal(received, floor); assert.equal(dbReads, 0); await running.stop();
+});

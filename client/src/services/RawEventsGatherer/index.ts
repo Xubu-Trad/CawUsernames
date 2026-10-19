@@ -108,7 +108,7 @@ export const rawEventsGathererService: Service = {
       // normal restart resumes from getLastProcessedEvent and only
       // rescans a small trailing range; checked directly on cawnest.com
       // and its most recent restart's rescan was near-empty). A worst-case
-      // full rescan (e.g. after a startBlock/creationBlock reset) could in
+      // full rescan (e.g. after a startBlock reset) could in
       // principle put `past` somewhere in that lifetime-volume range, which
       // is what this batch size is sized against. Sequential batches of
       // 500 would mean over a thousand round trips in that scenario; 5000
@@ -226,35 +226,11 @@ export const rawEventsGathererService: Service = {
         }
       }
 
-      // Resolve the fresh-DB start block. Precedence, strongest to weakest:
-      //   1. cfg.startBlock — explicit override in config.json, for
-      //      backfill/repair or short-circuiting history.
-      //   2. Client.creationBlock in DB — canonical "this client was created
-      //      at block N" for the client we're indexing. Populated from
-      //      the CawNetworkManager's on-chain CawNetwork struct once the
-      //      struct carries that field (pending a redeploy). For now
-      //      seeded manually via `npx tsx scripts/seed-network-creation-block.ts`.
-      //   3. undefined — the listener rejects startup rather than assuming
-      //      the current head is a complete historical starting point.
-      //
-      // A stored event alone does not prove earlier history was filled. The
-      // listener requires a floor on restart too, preserving its existing
-      // filled-history resume and configured-floor backfill behavior.
-      let resolvedStartBlock: number | undefined = cfg.startBlock
-      if (resolvedStartBlock === undefined) {
-        try {
-          const client = await prisma.network.findUnique({
-            where: { id: networkId },
-            select: { creationBlock: true },
-          })
-          if (client?.creationBlock != null) {
-            resolvedStartBlock = Number(client.creationBlock)
-            console.log(`[RawEventsGatherer] Using Network.creationBlock=${resolvedStartBlock} for networkId=${networkId}`)
-          }
-        } catch (err: any) {
-          console.warn(`[RawEventsGatherer] Failed to read Network.creationBlock: ${err?.message}`)
-        }
-      }
+      // Network.creationBlock comes from the L1 NetworkManager. It has no
+      // storage-chain provenance and must not become an L2 scan floor.
+      // Require an explicitly reviewed floor for the selected indexed chain.
+      // The listener rejects an absent/invalid floor before opening its RPC.
+      const resolvedStartBlock: number | undefined = cfg.startBlock
 
       const listener = await listenForRawEvents({
         rpcUrl,
