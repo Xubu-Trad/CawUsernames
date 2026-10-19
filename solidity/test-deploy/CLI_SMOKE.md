@@ -1,5 +1,13 @@
 # CLI command smoke checks
 
+## output alias preflight
+
+following ahdmesh's review of15008f45, the production non-Windows publisher checks the complete output plan before writing. canonical parent paths detect duplicate destinations even when the target is absent. existing targets must be regular files with one hardlink; repeated file identities, symlink targets, inaccessible metadata and missing/inaccessible parents reject. unsupported targets produce a sanitized preflight error before any configuration write.
+
+109 regression checks pass. the previous publisher passes104 and fails the five new rejection cases. coverage includes a real hardlink pair and real temporary files on Windows, with the non-Windows production branch selected in a VM; symlink and parent-alias cases use IO doubles. this is not native Linux integration. distinct ordinary files still succeed. nine synthetic actual-provider RPC/generation cases also pass; Windows valid-history generation still checks refusal, not successful publication.
+
+observed aliases are unsupported. a path or parent may still change after preflight; this does not prevent concurrent replacement, establish a writer lock, preserve all ACL semantics or recover interrupted writes. in-place publication remains sequential.
+
 ## current publication boundary — staged replacement withdrawn
 
 production configuration output no longer imports the experimental staged publisher. on non-Windows platforms, it writes outputs sequentially in place after the existing plan/preflight checks. Windows still refuses before filesystem access. the staged core remains isolated for regression research; earlier staging results below are historical, not the current production path.

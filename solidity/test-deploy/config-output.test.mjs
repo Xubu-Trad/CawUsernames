@@ -80,8 +80,9 @@ test('Windows refusal preserves existing files and creates no stage files', {ski
 }));
 
 function nonWindowsPublisher(io){
- const source=fs.readFileSync(new URL('../../cli/src/steps/config-output.mjs',import.meta.url),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
- const ctx={fs:io,process:{platform:'linux'}};vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.publish=publishConfigOutputs',ctx);return ctx.publish;
+ const source=fs.readFileSync(process.env.CAW_CONFIG_OUTPUT_SOURCE || new URL('../../cli/src/steps/config-output.mjs',import.meta.url),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'');
+ const checkedIO={realpathSync:file=>file,lstatSync:()=>{throw Object.assign(Error('absent'),{code:'ENOENT'});},...io};
+ const ctx={fs:checkedIO,path,process:{platform:'linux'}};vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.publish=publishConfigOutputs',ctx);return ctx.publish;
 }
 test('non-Windows production path writes in place without invoking staged replacement',()=>{
  const writes=[],modes=[],verified=[];
@@ -97,3 +98,33 @@ test('non-Windows readback failure prevents later writes',()=>{
  let calls=0;const io={writeFileSync(){calls++;}};
  assert.throws(()=>nonWindowsPublisher(io)([{file:'a',content:'a',verify(){throw Error('bad readback');}},{file:'b',content:'b'}]),/Installation incomplete/);assert.equal(calls,1);
 });
+
+// Actual Windows filesystem operations, but the production non-Windows branch
+// is selected in a VM. These are not native Linux permission tests.
+test('production preflight rejects hardlinked outputs before either content changes',()=>fixture(({a,b,outputs})=>{
+ fs.unlinkSync(b);fs.linkSync(a,b);
+ assert.throws(()=>nonWindowsPublisher(fs)(outputs),/target preflight failed/);
+ assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-a');
+}));
+test('production preflight rejects duplicate absent paths before creating files',()=>fixture(({dir})=>{
+ const file=path.join(dir,'new');
+ assert.throws(()=>nonWindowsPublisher(fs)([{file,content:'first'},{file:path.join(dir,'.','new'),content:'second'}]),/target preflight failed/);
+ assert.equal(fs.existsSync(file),false);
+}));
+test('production preflight rejects observed symlink target before any write',()=>{
+ let writes=0;
+ const io={realpathSync:file=>file,lstatSync:()=>({isFile:()=>false,nlink:1n,dev:1n,ino:1n}),writeFileSync(){writes++;}};
+ assert.throws(()=>nonWindowsPublisher(io)([{file:'alias',content:'synthetic'}]),/target preflight failed/);assert.equal(writes,0);
+});
+test('production preflight resolves parent aliases for absent destinations',()=>{
+ let writes=0;const io={realpathSync:()=>path.resolve('shared-parent'),writeFileSync(){writes++;}};
+ assert.throws(()=>nonWindowsPublisher(io)([{file:'one/env',content:'a'},{file:'two/env',content:'b'}]),/target preflight failed/);assert.equal(writes,0);
+});
+test('production preflight failure on a later target preserves earlier real file',()=>fixture(({a,b,outputs})=>{
+ const io={...fs,lstatSync:(file,...args)=>{if(file===b)throw Object.assign(Error('private path'),{code:'EACCES'});return fs.lstatSync(file,...args);}};
+ assert.throws(()=>nonWindowsPublisher(io)(outputs),e=>{assert.match(e.message,/No configuration files were written/);assert.doesNotMatch(e.message,/private path/);return true;});
+ assert.equal(fs.readFileSync(a,'utf8'),'old-a');assert.equal(fs.readFileSync(b,'utf8'),'old-b');
+}));
+test('production preflight allows distinct ordinary files',()=>fixture(({a,b,outputs})=>{
+ nonWindowsPublisher(fs)(outputs);assert.equal(fs.readFileSync(a,'utf8'),'new-a');assert.equal(fs.readFileSync(b,'utf8'),'new-b');
+}));
