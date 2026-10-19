@@ -18,7 +18,7 @@ for(const [label,change] of Object.entries({
  'RPC chain mismatch':f=>f.provider.send=async()=> '0x1',
 }))test(label+' rejects',async()=>{const {resolveHistoryFloor}=await load();const f=fixture();change(f);await assert.rejects(resolveHistoryFloor(f));});
 function generator(extra={}){
- const source=fs.readFileSync(path.join(__dirname,'../../cli/src/steps/generate.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'').replace(/await import\('ethers'\)/g,'await injectedImport()');
+ const source=fs.readFileSync(process.env.CAW_GENERATOR_SOURCE || path.join(__dirname,'../../cli/src/steps/generate.js'),'utf8').replace(/^import .*$/gm,'').replace(/export /g,'').replace(/await import\('ethers'\)/g,'await injectedImport()');
  let writes=0;const ctx={path,fs:{writeFileSync(){writes++;}},process:{env:{}},section(){},resolveHistoryFloor(){throw Error('not reached');}};
  Object.assign(ctx,extra);ctx.publishConfigOutputs=outputs=>{for(const o of outputs){ctx.fs.writeFileSync(o.file,o.content,o.mode?{mode:o.mode}:undefined);if(o.mode)ctx.fs.chmodSync(o.file,o.mode);if(o.verify)o.verify(o.file);}};vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.api={generateConfig,buildServiceList,prepareHistoryFloor,buildEnvVars,writeAddressesForNetwork,applyAddressPlan};',ctx);
  return {api:ctx.api,writes:()=>writes};
@@ -236,4 +236,40 @@ test('late compose rendering failure rejects before planned env/config publicati
  const g=generator({crypto:require('node:crypto'),console:{log(){}},success:x=>x,dim:x=>x});
  await assert.rejects(g.api.generateConfig('frontend-only',{network:'testnet',networkId:1,useDocker:'docker',dbUrl:{includes(){return false;},toString(){return 'postgresql://synthetic';},match(){throw Error('compose render failure');}}},'/synthetic'),/compose render failure/);
  assert.equal(g.writes(),0);
+});
+
+for (const [failure, expected] of [
+ ['missing',/manifest was not found/],['denied',/manifest could not be read/],
+ ['json',/manifest is not valid JSON/],['rpc',/RPC that can return/],
+ ['selection',/Network selection could not be verified/]
+]) test(`history diagnostic distinguishes ${failure} without exposing provider or file details`,async()=>{
+ const {resolveHistoryFloor}=await load();const f=fixture();let destroyed=0,writes=0;
+ const privateDetail='https://user:secret@example.invalid/private-key';
+ const txt=`export const deployments = {
+  testnet: {
+    L1: { CawNetworkManager: '${other}', CawProfile: '${other}'
+    },
+    L2: { CawActions: '${address}'
+    },
+  },
+}
+export const lzEids = {
+  testnet: { L1: 40161, L2: 40245,
+  },
+}`;
+ const storage={...f.provider,destroy(){destroyed++;}};
+ if(failure==='rpc')storage.getBlock=async()=>{throw Error(privateDetail);};
+ const l1={send:async()=>{if(failure==='selection')throw Error(privateDetail);return '0xaa36a7';},destroy(){destroyed++;}};
+ const g=generator({resolveHistoryFloor,makeProvider:(_e,url)=>url==='l1'?l1:storage,
+ injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>40245};}}}),
+ fs:{writeFileSync(){writes++;},readFileSync:file=>{
+  if(file.endsWith('deployments.ts'))return txt;
+  if(failure==='missing'||failure==='denied')throw Object.assign(Error(privateDetail),{code:failure==='missing'?'ENOENT':'EACCES'});
+  return failure==='json' ? privateDetail : JSON.stringify(f.manifest);
+ }}});
+ await assert.rejects(g.api.prepareHistoryFloor({l1RpcUrl:'l1',l2RpcUrl:'storage'},'/synthetic'),e=>{
+  assert.match(e.message,expected);assert.doesNotMatch(e.message,/user:secret|private-key|example.invalid/);
+  assert.match(e.message,/No current-head or legacy-floor fallback/);return true;
+ });
+ assert.equal(writes,0);assert.equal(destroyed,2);
 });

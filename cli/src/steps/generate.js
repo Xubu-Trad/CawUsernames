@@ -919,6 +919,7 @@ async function prepareHistoryFloor(config, clientDir) {
   const { ethers } = await import('ethers')
   const l1 = makeProvider(ethers, l1Url, config.l1RpcSecret)
   const storage = makeProvider(ethers, storageUrl, config.l2RpcSecret)
+  let historyPhase = 'selection'
   try {
     if (BigInt(await l1.send('eth_chainId', [])) !== BigInt(network.l1ChainId)) throw new Error('Wrong L1 chain')
     const txt = fs.readFileSync(path.join(clientDir, 'src/abi/deployments.ts'), 'utf8')
@@ -934,10 +935,25 @@ async function prepareHistoryFloor(config, clientDir) {
     const chainId = chains[chainKey]
     if (!chainId || BigInt(await storage.send('eth_chainId', [])) !== BigInt(chainId)) throw new Error('Wrong storage RPC chain')
     const manifestPath = process.env.CAW_CREATION_MANIFEST || path.join(clientDir, 'src/abi', `creation-receipts.${environment}.json`)
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    historyPhase = 'manifest-read'
+    const manifestText = fs.readFileSync(manifestPath, 'utf8')
+    historyPhase = 'manifest-parse'
+    const manifest = JSON.parse(manifestText)
+    historyPhase = 'receipt-check'
     return await resolveHistoryFloor({ environment, chainKey, chainId, addresses: deployments[chainKey], manifest, provider: storage })
-  } catch {
-    throw new Error('History verification failed. Supply reviewed creation receipts for the selected deployment with CAW_CREATION_MANIFEST and a matching storage RPC, then rerun. No current-head or legacy-floor fallback is used.')
+  } catch (error) {
+    // Fixed messages only: filesystem and provider errors may contain secrets.
+    let detail = 'Network selection could not be verified. Check the L1 RPC, network ID, deployment addresses and selected storage-chain RPC.'
+    if (historyPhase === 'manifest-read') {
+      detail = error?.code === 'ENOENT'
+        ? 'Creation manifest was not found. Supply reviewed creation receipts with CAW_CREATION_MANIFEST.'
+        : 'Creation manifest could not be read. Check file access for the selected manifest.'
+    } else if (historyPhase === 'manifest-parse') {
+      detail = 'Creation manifest is not valid JSON. Check the selected manifest file.'
+    } else if (historyPhase === 'receipt-check') {
+      detail = 'Creation records could not be verified. Check the manifest schema and selected chain/address records, and use an RPC that can return their creation transactions, receipts and canonical blocks. Missing or pruned RPC history can prevent verification even with a valid manifest; a mismatch also rejects.'
+    }
+    throw new Error(`History verification failed. ${detail} No configuration files were written. No current-head or legacy-floor fallback is used.`)
   } finally {
     l1.destroy?.()
     storage.destroy?.()
