@@ -14,7 +14,7 @@ const Config = z.object({
   chainId:         z.number().int().positive(),
   rpcUrl:          z.string(), // Validated at runtime after env var substitution
   redisUrl:        z.string().optional().default('redis://127.0.0.1:6379'),
-  startBlock:      z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(), // Manual override — overrides creationBlock
+  startBlock:      z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(), // Reviewed floor on the indexed chain; no database fallback
   networkId:        z.number().int().positive().optional(), // Defaults to CLIENT_ID env var
 })
 
@@ -232,6 +232,15 @@ export const rawEventsGathererService: Service = {
       // The listener rejects an absent/invalid floor before opening its RPC.
       const resolvedStartBlock: number | undefined = cfg.startBlock
 
+      // Completion is scoped to this exact scan request. Legacy flags carry
+      // no floor/address provenance and are intentionally not consulted.
+      // This does not authenticate a deployment generation or a reorg anchor.
+      const floorKey = 'raw-events-gatherer:floor-v2:' + JSON.stringify([
+        chainId, networkId, resolvedStartBlock,
+        CAW_ACTIONS_ADDRESS.toLowerCase(),
+        CAW_ACTIONS_ERC1271_ADDRESS?.toLowerCase() ?? null,
+      ])
+
       const listener = await listenForRawEvents({
         rpcUrl,
         chainId,
@@ -242,21 +251,14 @@ export const rawEventsGathererService: Service = {
           getLastProcessedEvent: getLast,
           storeEvent:            storeAndPublish,
           storeBatch:            storeBatchAndPublish,
-          // Floor-fill completion is persisted in ChainData (DB) rather than
-          // Redis: the flag is a write-once, never-touched-again key, so under
-          // an LRU/LFU maxmemory-policy it is the prime eviction candidate among
-          // the hot per-poll cursors — and losing it forces a full historical
-          // re-floor. ChainData is as durable as the events themselves and is
-          // never evicted. Written only after processEvents() returns
-          // successfully (see markFloorFilled call site), so a crash mid-scan
-          // still fails safe toward re-floor, never toward a false "filled".
-          isFloorFilled:   async () => {
-            const row = await prisma.chainData.findUnique({ where: { key: `raw-events-gatherer:${chainId}:${networkId}:floor-filled` } })
+          // Persist only under the current floor and contract scope. A scope
+          // change forces backfill; it does not delete existing event rows.
+          isFloorFilled: async () => {
+            const row = await prisma.chainData.findUnique({ where: { key: floorKey } })
             return (row?.value as any)?.filled === true
           },
           markFloorFilled: async () => {
-            const key = `raw-events-gatherer:${chainId}:${networkId}:floor-filled`
-            await prisma.chainData.upsert({ where: { key }, update: { value: { filled: true } }, create: { key, value: { filled: true } } })
+            await prisma.chainData.upsert({ where: { key: floorKey }, update: { value: { filled: true } }, create: { key: floorKey, value: { filled: true } } })
           },
           countExisting,
         },

@@ -113,3 +113,44 @@ for (const floor of [0, 100]) test(`explicit indexed-chain floor ${floor} reache
   await running.started;
   assert.equal(received, floor); assert.equal(dbReads, 0); await running.stop();
 });
+
+async function markerHarness(rows, changes={}) {
+ const options={chainId:84532,networkId:1,startBlock:100,address:'0x'+'a'.repeat(40),sibling:null,...changes};
+ const chain=new Proxy({}, {get:()=>()=>chain});let provider;
+ const context=vm.createContext({
+  z:{number:()=>chain,string:()=>chain,object:()=>({parse:x=>x})},Redis:class {},
+  prisma:{$connect:async()=>{},$disconnect:async()=>{},chainData:{
+   findUnique:async({where})=>rows.has(where.key)?{value:rows.get(where.key)}:null,
+   upsert:async({where,create,update})=>{rows.set(where.key,rows.has(where.key)?update.value:create.value);}
+  }},
+  listenForRawEvents:async config=>{provider=config.rawEventsProvider;return {stop(){}};},
+  getRawEventsPollIntervalMs:()=>30000,getL2WsRpcUrl:()=> 'http://test.invalid',getNetworkId:()=>1,
+  CAW_ACTIONS_ADDRESS:options.address,CAW_ACTIONS_ERC1271_ADDRESS:options.sibling,console:{log(){},warn(){}}
+ });
+ const service=vm.runInContext(`${callerJS}\nrawEventsGathererService`,context,{timeout:1000});
+ const running=service.start({...options,rpcUrl:'http://test.invalid'},{declareLoop(){}});
+ await running.started;await running.stop();return provider;
+}
+test('legacy unscoped completion cannot suppress a requested backfill',async()=>{
+ const rows=new Map([['raw-events-gatherer:84532:1:floor-filled',{filled:true}]]);
+ const p=await markerHarness(rows);assert.equal(await p.isFloorFilled(),false);assert.equal(rows.size,1);
+});
+test('same scope resumes after marking and address case is normalized',async()=>{
+ const rows=new Map();const p=await markerHarness(rows);assert.equal(await p.isFloorFilled(),false);
+ await p.markFloorFilled();assert.equal(await (await markerHarness(rows)).isFloorFilled(),true);
+ assert.equal(await (await markerHarness(rows,{address:'0x'+'A'.repeat(40)})).isFloorFilled(),true);assert.equal(rows.size,1);
+});
+for(const [name,change] of Object.entries({earlierFloor:{startBlock:50},laterFloor:{startBlock:150},primary:{address:'0x'+'b'.repeat(40)},sibling:{sibling:'0x'+'c'.repeat(40)},chain:{chainId:421614},network:{networkId:2}})) {
+ test(`changed ${name} does not reuse the previous completion marker`,async()=>{
+  const rows=new Map();await (await markerHarness(rows)).markFloorFilled();
+  const changed=await markerHarness(rows,change);assert.equal(await changed.isFloorFilled(),false);
+  await changed.markFloorFilled();assert.equal(rows.size,2);
+  assert.equal(await (await markerHarness(rows)).isFloorFilled(),true);
+ });
+}
+
+test('lowering the floor resumes historical selection at the new floor rather than the last event',async()=>{
+ const rows=new Map();await (await markerHarness(rows)).markFloorFilled();
+ const earlier=await markerHarness(rows,{startBlock:50});
+ assert.deepEqual(await run(50,{blockNumber:500},await earlier.isFloorFilled()),{startBlock:50,resumingFromLast:false});
+});

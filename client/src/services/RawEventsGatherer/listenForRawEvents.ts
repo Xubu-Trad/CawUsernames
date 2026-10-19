@@ -260,7 +260,7 @@ export default async function listenForRawEvents(
        */
       storeBatch?(events: RawEventInput[]): Promise<void>
       /**
-       * Floor-fill guard (idempotent, Redis-backed). isFloorFilled() reports
+       * Floor-fill guard (persistent scope supplied by the service). isFloorFilled() reports
        * whether the historical scan down to the configured startBlock has
        * completed on a prior run; markFloorFilled() records completion. Once
        * filled, restarts resume from the last processed block instead of
