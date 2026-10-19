@@ -79,7 +79,7 @@ function ZERO(addr) {
   return addr && addr.toLowerCase() === '0x0000000000000000000000000000000000000000';
 }
 
-let passed = 0, failed = 0, warnings = 0;
+let passed = 0, failed = 0;
 const fails = [];
 
 function eq(name, actual, expected) {
@@ -110,11 +110,6 @@ function ok(name, cond, detail) {
     fails.push({ name, detail });
     return false;
   }
-}
-
-function warn(name, detail) {
-  console.log(`  ⚠ ${name}: ${detail}`);
-  warnings++;
 }
 
 async function main() {
@@ -260,7 +255,7 @@ async function main() {
   // Summary
   // -----------------------------------------------------------------
   console.log('\n=========================================');
-  console.log(`Verification complete: ${passed} passed, ${failed} failed${warnings ? `, ${warnings} warnings` : ''}.`);
+  console.log(`Verification complete: ${passed} passed, ${failed} failed.`);
   if (failed > 0) {
     console.log('\nFailures:');
     for (const f of fails) console.log('  -', f.name);
