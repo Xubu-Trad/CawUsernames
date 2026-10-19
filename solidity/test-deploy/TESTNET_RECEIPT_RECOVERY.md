@@ -1,6 +1,6 @@
 # current testnet receipt recovery
 
-status: open. this is a recovery inventory, not a creation manifest.
+status: six candidate records independently matched through the PR verifier on 2026-10-19. the public manifest is now at `client/src/abi/creation-receipts.testnet.json`. earlier access failures below are historical, not the current recovery result.
 
 The addresses below come from committed deployment state at `97cd13f3a1423f702d411472fdd2b2a2e7bfbd59`. The state records a legacy `l2DeployBlock` of 45547765 but no creation receipts. A scoped history search for the Base CawActions address in `.deploy-state.json` identifies `2cb5e1326bfc2562bb9dd358914c5f1291fd37ea`; that commit records explorer verification claims, not creation transaction hashes. Those claims have not been independently verified in this recovery pass.
 
@@ -20,3 +20,17 @@ For each selected chain's contracts, recover the actual creation transaction has
 Public read-only requests to the Base Sepolia Blockscout address API and the repository's default `https://sepolia.base.org` RPC returned HTTP 403 in this environment. Browser retrieval of the corresponding explorer pages was also unavailable. No creation hash or historical receipt was recovered. This is an access limitation here, not evidence that the contracts or receipts do not exist.
 
 Builders can unblock recovery by sharing the public creation transaction hashes or a receipt manifest with reproducible read-only verification. Do not share wallet keys or credential-bearing RPC URLs. Fresh indexer installations remain gated until the selected deployment's required records can be checked. This inventory is not production readiness or proof of finality.
+
+## recovered records - 2026-10-19
+
+tentencaw supplied six candidate records in issuecomment-6263887020. all six addresses were compared with pinned deployment state above. this pass called the actual verifyManifestEntry/readCreationRecord code with ethers against public RPCs, checking chain ID, direct creation, successful receipt, expected address, transaction/receipt inclusion agreement and the RPC canonical block hash at the recorded height.
+
+| chain | earliest of actions and ERC1271 creation blocks | successful endpoint |
+|---|---:|---|
+| Ethereum Sepolia11155111 |11499545|https://sepolia.gateway.tenderly.co|
+| Base Sepolia84532 |45547482|https://base-sepolia.gateway.tenderly.co|
+| Arbitrum Sepolia421614 |298656592|https://sepolia-rollup.arbitrum.io/rpc|
+
+the first Ethereum Sepolia endpoint, ethereum-sepolia-rpc.publicnode.com, returned unavailable transaction/receipt data for both L1 records. the alternate endpoint passed. these failures are retained in TESTNET_RECEIPT_OBSERVATIONS.json. availability can change; the installer must still verify the selected records at runtime and reject unavailable or mismatched evidence. a manifest does not repair a pruned RPC.
+
+this establishes RPC-consistent creation metadata, not independent consensus, bytecode equivalence, finality or complete event availability. no live installation, logs-completeness or real-funds action was attempted. Node24.20.0 and the existing memory/process/time limits were retained. the Windows publication refusal and other installation gates remain in force.
