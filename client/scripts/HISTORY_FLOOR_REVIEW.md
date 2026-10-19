@@ -45,3 +45,9 @@ the service now reads/writes a versioned marker keyed by indexed chain, network,
 34 mocked tests pass; the previous parent service fails six cases. tests exercise the actual service callbacks with an in-memory ChainData substitute and actual scanner selection code. lowering floor100 to50 with a last event500 selects50 rather than resuming500. no live Prisma/Redis/RPC stack was run. the existing Prisma key is String, so no schema migration is introduced. full client semantic typechecking remains required.
 
 this prevents scope-mismatched flags from skipping a requested backfill. it does not authenticate a block hash, deployment generation, event completeness, same-address redeployment or reorganization. a malformed or falsely written marker, partial database, and concurrent scanners remain separate recovery concerns. the change does not clear or reconcile event rows.
+
+## scan completion condition
+
+a head below the requested start previously skipped historical reads but still wrote the completion marker. this revision requires a successfully scanned range before marking, followed by the existing processing/known-row check. an eligible empty range still qualifies; skipped and failed reads do not. the startup/polling flow is otherwise unchanged. a later restart retries without the marker; this is not automatic reconciliation or proof of complete RPC data.
+
+38 mocked checks pass; the pre-change scanner fails the new head-below-start case (37 pass). tests execute the actual historical block and marker code with mocked scan/provider/processing functions, including empty, nonempty and failed-read controls. no live node or end-to-end event derivation claim.

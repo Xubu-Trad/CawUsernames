@@ -154,3 +154,32 @@ test('lowering the floor resumes historical selection at the new floor rather th
  const earlier=await markerHarness(rows,{startBlock:50});
  assert.deepEqual(await run(50,{blockNumber:500},await earlier.isFloorFilled()),{startBlock:50,resumingFromLast:false});
 });
+
+const scanStart=source.indexOf('  // Fetch historical events using HTTP provider');
+const scanEnd=source.indexOf('  // Setup WebSocket for real-time events',scanStart);
+assert.ok(scanStart>=0&&scanEnd>scanStart);
+const historicalJS=stripTypeScriptTypes(source.slice(scanStart,scanEnd),{mode:'strip'});
+async function scanCompletion({head=200,start=100,logs=[],fail=false,filled=false}={}) {
+ let reads=0,marks=0,derived=0;
+ const ctx=vm.createContext({startBlock:start,floorAlreadyFilled:filled,
+  config:{startBlock:start,rawEventsProvider:{markFloorFilled:async()=>{marks++;}}},
+  httpProvider:{getBlockNumber:async()=>head},httpContract:{interface:{getEvent:()=>({topicHash:'synthetic'})}},
+  CAW_ACTIONS_ADDRESS:'primary',CAW_ACTIONS_ERC1271_ADDRESS:'sibling',L2_LOG_CHUNK_BLOCKS:100,
+  scanLogsForward:async()=>{reads++;if(fail)throw Error('read failure');return logs;},
+  processEvents:async()=>{derived++;},delay:async()=>{throw Error('bounded retry stop');},console:{log(){},error(){}}
+ });
+ let rejected=false;try{await vm.runInContext(`(async()=>{${historicalJS}})()`,ctx,{timeout:1000});}catch(e){assert.match(e.message,/bounded retry stop/);rejected=true;}
+ return {reads,marks,derived,rejected};
+}
+test('head below scan start does not mark unread history complete',async()=>{
+ assert.deepEqual(await scanCompletion({head:99}),{reads:0,marks:0,derived:1,rejected:false});
+});
+test('completed empty historical range may mark completion',async()=>{
+ assert.deepEqual(await scanCompletion(),{reads:2,marks:1,derived:1,rejected:false});
+});
+test('completed nonempty historical range marks after processing',async()=>{
+ assert.deepEqual(await scanCompletion({logs:[{blockNumber:110,index:0}]}),{reads:2,marks:1,derived:1,rejected:false});
+});
+test('failed historical read does not mark completion',async()=>{
+ assert.deepEqual(await scanCompletion({fail:true}),{reads:1,marks:0,derived:0,rejected:true});
+});
