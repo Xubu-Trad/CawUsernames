@@ -1,0 +1,17 @@
+[
+  {
+    "file": "source.ts",
+    "url": "https://raw.githubusercontent.com/GilgameshCaw/Caw/e55ce35039a16f30e0368d45e25d19f910952f67/client/src/services/SponsorRepayIndexer/index.ts",
+    "sha256": "56c8d0d58a50a702eb6122d571fad7a0908a83de14925aa9d01504544163eeec"
+  },
+  {
+    "file": "current.ts",
+    "url": "https://raw.githubusercontent.com/GilgameshCaw/Caw/fda7a80ad291499c07eca4631f6dbe8b43921d40/client/src/services/SponsorRepayIndexer/index.ts",
+    "sha256": "a342ff73cb084a7b85506aae2ece7ed82cc87f42b3a9c38dd7364ce34c7c96e6"
+  },
+  {
+    "file": "runServices.ts",
+    "url": "https://raw.githubusercontent.com/GilgameshCaw/Caw/97cd13f3a1423f702d411472fdd2b2a2e7bfbd59/client/src/runServices.ts",
+    "sha256": "f4f6541d0c7c37ed31240b370917946658cfe2f686ab6c85e1220e8ea314c23f"
+  }
+]
