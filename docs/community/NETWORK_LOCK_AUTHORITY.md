@@ -28,6 +28,10 @@ this change corrects the renounce-equivalent description only. it does not add a
 [tentencaw reviewed head 213af9b6](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6255525806) and reports seven passing authority tests on master and that head, plus comparisons of 277 compiled artifacts after masking Solidity metadata. these are reviewer-reported results, not independently rerun here. source inspection confirms the additional withdrawFeesFor path and the sponsor event writes. [the reviewer subsequently supplied the test source and exact commands](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6264310519) and reports the same seven tests and 277-artifact comparison on `377fa67e`. the full forge build has not been rerun here. the supplied comparator is a report, not yet an automated acceptance gate: a local Linux check using two synthetic unequal bytecode artifacts printed `CODE DIFFERS` but returned exit 0. artifact-set differences also do not change its exit status by source inspection. [the requested correction](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6266353273) is to fail on code differences or unequal artifact sets. this synthetic check does not challenge or independently reproduce the reported contract build.
 
 
+## comparator follow-up
+
+[the reviewer supplied a corrected comparator](https://github.com/GilgameshCaw/Caw/pull/334#issuecomment-6279728839). five synthetic Linux checks were rerun here: identical artifacts and metadata-only differences exit 0; runtime differences, unequal artifact sets and empty inputs exit 1. this closes the exit-status issue described above. the full forge build and seven authority tests remain reviewer-reported. the comparison masks a specific Solidity metadata encoding; these checks do not establish general semantic equivalence or protocol readiness.
+
 ## behavioral patch review gates
 
 these are proposed acceptance checks, not an adopted policy or implemented terminal state. recording them does not authorize a deployment.
