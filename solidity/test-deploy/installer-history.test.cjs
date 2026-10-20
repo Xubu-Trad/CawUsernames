@@ -273,3 +273,73 @@ export const lzEids = {
  });
  assert.equal(writes,0);assert.equal(destroyed,2);
 });
+
+async function siblingPlan(role, sibling, verifiedSibling=sibling) {
+ const eid=role==='L2'?40245:40231;
+ const txt=`export const deployments = {
+  testnet: {
+    L1: { CawNetworkManager: '${other}', CawProfile: '${other}', CawActionsERC1271: '${other}'
+    },
+    ${role}: { CawActions: '${address}', CawProfileLedger: '${other}'${sibling ? ", CawActionsERC1271: '"+sibling+"'" : ''}
+    },
+  },
+}
+export const lzEids = {
+  testnet: { L1: 40161, L2: 40245, L2b: 40231,
+  },
+}`;
+ const g=generator({console:{log(){}},dim:x=>x,warn:x=>x,makeProvider:()=>({destroy(){}}),
+ injectedImport:async()=>({ethers:{Contract:function(){return {getStorageChainEid:async()=>eid};}}}),
+ fs:{readFileSync:()=>txt}});
+ return g.api.writeAddressesForNetwork({network:'testnet',networkId:1,l1RpcUrl:'synthetic'},'/synthetic',
+ {chainKey:role,actions:address,actionsERC1271:verifiedSibling},{prepareOnly:true});
+}
+for(const role of ['L2','L2b']) {
+ test(role+' writer uses verified storage sibling rather than L1',async()=>{
+  const p=await siblingPlan(role,address);assert.ok(p.out.includes(`CAW_ACTIONS_ERC1271_ADDRESS = "${address}"`));
+ });
+ test(role+' storage-only sibling changes generated scan scope input',async()=>{
+  const a=await siblingPlan(role,address),b=await siblingPlan(role,'0x'+'ef'.repeat(20));
+  assert.notEqual(a.out.match(/CAW_ACTIONS_ERC1271_ADDRESS = ([^;]+)/)[1],b.out.match(/CAW_ACTIONS_ERC1271_ADDRESS = ([^;]+)/)[1]);
+ });
+ for(const [name,current,verified] of [['changed',other,address],['removed',null,address],['added',address,null]])
+  test(role+' rejects '+name+' sibling after receipt verification',async()=>{await assert.rejects(siblingPlan(role,current,verified),/selection changed/);});
+ test(role+' absent sibling does not fall back to L1',async()=>{const p=await siblingPlan(role,null);assert.ok(p.out.includes('CAW_ACTIONS_ERC1271_ADDRESS = undefined'));});
+}
+test('history result records the verified contract set',async()=>{
+ const {resolveHistoryFloor}=await load();const f=fixture();assert.equal((await resolveHistoryFloor(f)).actionsERC1271,null);
+ f.addresses.CawActionsERC1271=address;f.manifest.contracts.CawActionsERC1271_L2={...f.manifest.contracts.CawActions_L2};
+ assert.equal((await resolveHistoryFloor(f)).actionsERC1271,address);
+});
+
+test('generated sibling change invalidates actual history service marker', {skip:!process.env.CAW_HISTORY_PARENT_SOURCE},async()=>{
+ const {stripTypeScriptTypes}=require('node:module');
+ const callerSource=fs.readFileSync(process.env.CAW_HISTORY_PARENT_SOURCE,'utf8');
+ const callerJS=stripTypeScriptTypes(callerSource.replace(/^import .*\r?\n/gm,'').replace('export const rawEventsGathererService','const rawEventsGathererService'),{mode:'strip'});
+async function markerHarness(rows, changes={}) {
+ const options={chainId:84532,networkId:1,startBlock:100,address:'0x'+'a'.repeat(40),sibling:null,...changes};
+ const chain=new Proxy({}, {get:()=>()=>chain});let provider;
+ const context=vm.createContext({
+  z:{number:()=>chain,string:()=>chain,object:()=>({parse:x=>x})},Redis:class {},
+  prisma:{$connect:async()=>{},$disconnect:async()=>{},chainData:{
+   findUnique:async({where})=>rows.has(where.key)?{value:rows.get(where.key)}:null,
+   upsert:async({where,create,update})=>{rows.set(where.key,rows.has(where.key)?update.value:create.value);}
+  }},
+  listenForRawEvents:async config=>{provider=config.rawEventsProvider;return {stop(){}};},
+  getRawEventsPollIntervalMs:()=>30000,getL2WsRpcUrl:()=> 'http://test.invalid',getNetworkId:()=>1,
+  CAW_ACTIONS_ADDRESS:options.address,CAW_ACTIONS_ERC1271_ADDRESS:options.sibling,console:{log(){},warn(){}}
+ });
+ const service=vm.runInContext(`${callerJS}\nrawEventsGathererService`,context,{timeout:1000});
+ const running=service.start({...options,rpcUrl:'http://test.invalid'},{declareLoop(){}});
+ await running.started;await running.stop();return provider;
+}
+
+ for(const role of ['L2','L2b']) {
+  const first=await siblingPlan(role,address),second=await siblingPlan(role,'0x'+'ef'.repeat(20));
+  const read=p=>p.out.match(/CAW_ACTIONS_ERC1271_ADDRESS = "([^"]+)"/)[1];
+  const rows=new Map();const chainId=role==='L2'?84532:421614;
+  const initial=await markerHarness(rows,{sibling:read(first),chainId});await initial.markFloorFilled();
+  assert.equal(await (await markerHarness(rows,{sibling:read(first),chainId})).isFloorFilled(),true);
+  assert.equal(await (await markerHarness(rows,{sibling:read(second),chainId})).isFloorFilled(),false);
+ }
+});

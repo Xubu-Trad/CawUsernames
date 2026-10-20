@@ -18,5 +18,5 @@ export async function resolveHistoryFloor({ environment, chainKey, chainId, addr
     const record = await verifyManifestEntry(provider, manifest, `${name}_${chainKey}`, addresses[name], chainId);
     blocks.push(record.blockNumber);
   }
-  return { chainId, chainKey, actions: addresses.CawActions, startBlock: Math.min(...blocks) };
+  return { chainId, chainKey, actions: addresses.CawActions, actionsERC1271: addresses.CawActionsERC1271 ?? null, startBlock: Math.min(...blocks) };
 }
