@@ -1,0 +1,12 @@
+--- a/client/src/services/SponsorRepayIndexer/index.ts
++++ b/client/src/services/SponsorRepayIndexer/index.ts
+@@ -306,8 +306,8 @@
+           await opts.processEvents(merged)
+         }
+ 
++        await saveCheckpoint(opts.redis, opts.cpKey, to)
+         lastBlock = to
+-        await saveCheckpoint(opts.redis, opts.cpKey, to)
+       }
+       consecutiveFailures = 0
+       opts.heartbeat(opts.label)

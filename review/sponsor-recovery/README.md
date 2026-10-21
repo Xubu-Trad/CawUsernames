@@ -10,7 +10,7 @@ ethers 6.16.0. installing it is a separate dependency download:
 ```sh
 python prepare.py
 npm install --no-save --package-lock=false --ignore-scripts ethers@6.16.0
-node --max-old-space-size=256 --test --test-isolation=none --test-concurrency=1 --test-timeout=10000 enumeration.test.cjs watchdog.test.cjs startup.test.cjs
+node --max-old-space-size=256 --test --test-isolation=none --test-concurrency=1 --test-timeout=10000 enumeration.test.cjs watchdog.test.cjs startup.test.cjs checkpoint.test.cjs
 ```
 
 alternatively set `CAW_ETHERS_PACKAGE` to an existing ethers 6.16.0 installation.
@@ -24,9 +24,9 @@ the VM is not a security sandbox. use only the pinned, verified inputs.
 
 ## observed
 
-16 checks pass locally. the old filter enumeration skips queries while advancing
+the original 16 checks passed locally; two additional checkpoint checks also pass. the old filter enumeration skips queries while advancing
 the checkpoint. the current version fetches events and retains the checkpoint on
-a failed write. actual supervisor/poll functions under virtual time restart a
+a failed database write. Redis checkpoint failure has a separate ordering gap, below. actual supervisor/poll functions under virtual time restart a
 persistent failure at 1955 seconds and a hung poll at 215 seconds; recovery avoids
 the restart. configured-chain startup declares only loops that run.
 
@@ -40,8 +40,11 @@ RPC, Redis, Prisma, time and stats are mocked. configuration validation and real
 environment fallback resolution are excluded. no real database, chain replay,
 full installation or production loss was demonstrated.
 
-the checked machine has no PostgreSQL/Redis/Docker executable available through
-the inspected Windows/WSL paths. operational recovery remains untested.
+additional local storage trials now use isolated PostgreSQL 14, Redis 6,
+Prisma/client 6.18.0 and ioredis 5.6.1. a rejected SQL write held the checkpoint;
+retry after removing the constraint recovered the expected balance. these real
+storage trials still use synthetic RPC, events and scheduling. their harness is
+not included here yet; they do not establish whole-node recovery.
 
 before a real recovery trial:
 
@@ -55,3 +58,27 @@ before a real recovery trial:
    balances, event coverage and retry behavior against an independent reference.
 5. explicitly decide timestamp semantics, test interruptions and restart, then
    document cutover and rollback. do not switch a live node on these mock results.
+
+## checkpoint write ordering
+
+`checkpoint.test.cjs` reproduces a separate issue at `fda7a80`: the poll loop
+updates `lastBlock` before awaiting Redis. if Redis rejects that write and the
+chain height stays unchanged, the next poll reports healthy without retrying the
+checkpoint. the older durable checkpoint remains. this is not evidence of
+permanent event loss: a later block can trigger another save, and restart can
+replay from the older checkpoint.
+
+`checkpoint-order.patch` moves the in-memory update after the awaited save.
+the baseline and candidate assertions both pass, distinguishing the bug from the
+fix. apply the patch to the pinned PR source, not unrelated master revisions.
+
+in the local real-storage trial, Redis `min-replicas-to-write=1` with no replicas
+rejected SET with NOREPLICAS. after restoring that setting to zero, baseline
+remained at checkpoint10 while reporting healthy; the candidate retried and
+saved11. a separate fresh Node process loaded the baseline's saved10 and replayed
+to11 using the retained database. services were disposable, Unix-socket-only and
+stopped after testing. this is a graceful test-process replacement, not a crash,
+power-loss, Redis persistence, real-chain or complete service-startup test.
+
+replay timestamp behavior and missing-registration backfill remain open. this
+patch does not make PostgreSQL and Redis writes atomic.
