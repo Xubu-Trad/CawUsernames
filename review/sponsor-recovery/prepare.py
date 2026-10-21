@@ -7,7 +7,7 @@ from urllib.request import urlopen
 root = Path(__file__).resolve().parent
 for item in json.loads((root / "sources.json").read_text()):
     name = item["file"]
-    if name not in {"source.ts", "current.ts", "runServices.ts"}:
+    if name not in {"source.ts", "current.ts", "runServices.ts", "database-schema.prisma"}:
         raise ValueError("unexpected output name")
     url = item["url"]
     if not url.startswith("https://raw.githubusercontent.com/GilgameshCaw/Caw/"):

@@ -10,7 +10,7 @@ ethers 6.16.0. installing it is a separate dependency download:
 ```sh
 python prepare.py
 npm install --no-save --package-lock=false --ignore-scripts ethers@6.16.0
-node --max-old-space-size=256 --test --test-isolation=none --test-concurrency=1 --test-timeout=10000 enumeration.test.cjs watchdog.test.cjs startup.test.cjs checkpoint.test.cjs
+node --max-old-space-size=256 --test --test-isolation=none --test-concurrency=1 --test-timeout=10000 enumeration.test.cjs watchdog.test.cjs startup.test.cjs checkpoint.test.cjs checkpoint-load.test.cjs
 ```
 
 alternatively set `CAW_ETHERS_PACKAGE` to an existing ethers 6.16.0 installation.
@@ -24,7 +24,7 @@ the VM is not a security sandbox. use only the pinned, verified inputs.
 
 ## observed
 
-the original 16 checks passed locally; two additional checkpoint checks also pass. the old filter enumeration skips queries while advancing
+the original 16 checks passed locally; two additional checkpoint-order checks and three checkpoint-loader checks also pass. the old filter enumeration skips queries while advancing
 the checkpoint. the current version fetches events and retains the checkpoint on
 a failed database write. Redis checkpoint failure has a separate ordering gap, below. actual supervisor/poll functions under virtual time restart a
 persistent failure at 1955 seconds and a hung poll at 215 seconds; recovery avoids
@@ -43,8 +43,8 @@ full installation or production loss was demonstrated.
 additional local storage trials now use isolated PostgreSQL 14, Redis 6,
 Prisma/client 6.18.0 and ioredis 5.6.1. a rejected SQL write held the checkpoint;
 retry after removing the constraint recovered the expected balance. these real
-storage trials still use synthetic RPC, events and scheduling. their harness is
-not included here yet; they do not establish whole-node recovery.
+storage trials still use synthetic RPC, events and scheduling. their reproducible harness and prerequisites are in [storage](storage/README.md);
+they do not establish whole-node recovery.
 
 before a real recovery trial:
 
@@ -82,3 +82,16 @@ power-loss, Redis persistence, real-chain or complete service-startup test.
 
 replay timestamp behavior and missing-registration backfill remain open. this
 patch does not make PostgreSQL and Redis writes atomic.
+
+## missing checkpoint boundaries
+
+`checkpoint-load.test.cjs` characterizes the pinned loader: absence returns its
+caller fallback; an explicit earlier fallback is retained; a stored checkpoint
+wins. startup currently supplies the chain tip when no start block is configured.
+therefore losing Redis state without an explicit historical floor does not itself
+request historical recovery. do not treat deleting checkpoints as a backfill tool.
+
+the parser also accepts a numeric prefix such as `12junk` and yields NaN for
+nonnumeric text. these are synthetic malformed-input checks, not evidence that
+normal Redis writes produced corrupted values. choosing fail-closed validation
+and a deployment-derived recovery floor remains separate from the ordering patch.

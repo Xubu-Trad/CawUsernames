@@ -1,0 +1,38 @@
+{
+  "libjemalloc2_5.2.1-4ubuntu1_amd64.deb": {
+    "bytes": 239774,
+    "sha256": "144eaa64b9da0319760c407ebe330b46d9d03ef9952fc067d48221cc9832e45c"
+  },
+  "liblua5.1-0_5.1.5-8.1build4_amd64.deb": {
+    "bytes": 99900,
+    "sha256": "a8309a74f42109dea7c79c6c8216f4252d9f0c9f1fc1bd329a4885f417df1eda"
+  },
+  "liblzf1_3.6-3_amd64.deb": {
+    "bytes": 7444,
+    "sha256": "033339fa56064777899e6f76d4ca6cf93b76930f0ce6d955b81f9907fc2b9c8a"
+  },
+  "lua-bitop_1.0.2-5_amd64.deb": {
+    "bytes": 6680,
+    "sha256": "b4e7d0626c426ffa93a46b2b2366e806835c503d5381c85bf72158adb1dcca38"
+  },
+  "lua-cjson_2.1.0+dfsg-2.1_amd64.deb": {
+    "bytes": 17436,
+    "sha256": "56c1216c591a7ebd2f2954cc18118097c0c32fb9f745d2e18b8c492e0d46a2e4"
+  },
+  "postgresql-14_14.24-0ubuntu0.22.04.1_amd64.deb": {
+    "bytes": 16300718,
+    "sha256": "d3f5c254fac89a46d9c92c3f098a1c8635b3445f5d9fd609a05041cda6ed4aef"
+  },
+  "postgresql-client-14_14.24-0ubuntu0.22.04.1_amd64.deb": {
+    "bytes": 1252526,
+    "sha256": "d63f6b9020c137fe6c47f9f68cababdd2f09f57ff26df79768daa0f3d3a35e8a"
+  },
+  "redis-server_5%3a6.0.16-1ubuntu1.2_amd64.deb": {
+    "bytes": 45864,
+    "sha256": "73b290ff8e6ba230f29841a5d7effe72bb4537766b9f109d4a4b1e620f57b93e"
+  },
+  "redis-tools_5%3a6.0.16-1ubuntu1.2_amd64.deb": {
+    "bytes": 860880,
+    "sha256": "58f0080318ac7eafb6338bab5f91e82de507cacf9bfa48b82e0faf595f1a075b"
+  }
+}

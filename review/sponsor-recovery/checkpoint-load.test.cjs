@@ -1,0 +1,12 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const {stripTypeScriptTypes}=require('node:module');
+const s=fs.readFileSync(__dirname+'/current.ts','utf8');
+const code=s.slice(s.indexOf('async function loadCheckpoint'),s.indexOf('async function saveCheckpoint'));
+const c=vm.createContext({});
+vm.runInContext(stripTypeScriptTypes(code)+'\nglobalThis.load=loadCheckpoint;',c);
+test('absent checkpoint uses caller fallback, including current chain tip',async()=>{assert.equal(await c.load({get:async()=>null},'test',500),500);});
+test('explicit earlier fallback survives absence and saved checkpoint wins',async()=>{assert.equal(await c.load({get:async()=>null},'test',10),10);assert.equal(await c.load({get:async()=>'15'},'test',10),15);});
+test('pinned parser accepts partial numeric checkpoint and returns NaN for malformed text',async()=>{assert.equal(await c.load({get:async()=>'12junk'},'test',10),12);assert.ok(Number.isNaN(await c.load({get:async()=>'bad'},'test',10)));});

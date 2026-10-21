@@ -13,5 +13,10 @@
     "file": "runServices.ts",
     "url": "https://raw.githubusercontent.com/GilgameshCaw/Caw/97cd13f3a1423f702d411472fdd2b2a2e7bfbd59/client/src/runServices.ts",
     "sha256": "f4f6541d0c7c37ed31240b370917946658cfe2f686ab6c85e1220e8ea314c23f"
+  },
+  {
+    "file": "database-schema.prisma",
+    "url": "https://raw.githubusercontent.com/GilgameshCaw/Caw/97cd13f3a1423f702d411472fdd2b2a2e7bfbd59/client/prisma/schema.prisma",
+    "sha256": "22608b74f385d96b1becf3542851f507c84a6724dcee602ee75643a4aa1afc0d"
   }
 ]
