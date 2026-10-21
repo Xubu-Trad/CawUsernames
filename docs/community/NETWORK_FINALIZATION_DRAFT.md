@@ -79,3 +79,37 @@ fee withdrawal, message delivery, client/indexer handling of the new event and
 owner-zero state, and full reproducible builds with independent reviewers.
 other deployer/bootstrap, external library, economic, storage and proof-system
 gaps remain open. #221 and #276 are separate proposals, not included here.
+
+## withdrawal-method and client follow-up
+
+additional local EVM tests compile the three exact withdrawal methods extracted
+from pinned master CawProfile, checked by SHA256
+`895587b2b3c5e82b46da892ca1c50fdb489510e7089c5f6467246ccd4675a698`.
+the surrounding storage/funding fixture and swap recorder are synthetic; the
+candidate network manager is deployed as compiled. this is not the full profile,
+a real swap, real fee accrual or an end-to-end withdrawal test.
+
+observed: existing dual locks allow delegated withdrawal before finalization;
+former-owner and stranger delegated calls reject afterward. the recipient can
+still withdraw directly, including when recipient and former owner are the same
+account. partial protocol matching and a surplus pool were checked. a real failed
+local transaction to the rejecting swap fixture left fee balances unchanged;
+retry succeeded after the rejection was removed.
+
+from solidity/, supply the exact pinned CawProfile source as an input file:
+
+```sh
+python3 test-deploy/network-withdrawal-input.py /path/to/pinned/CawProfile.sol > /tmp/withdrawal-input.json
+solc --standard-json < /tmp/withdrawal-input.json > /tmp/withdrawal-output.json
+# fresh local Anvil on port18672, chain31337, as above
+node --max-old-space-size=256 test-deploy/network-withdrawal-live.cjs /path/to/ethers.umd.cjs /tmp/withdrawal-output.json
+node --max-old-space-size=256 --test test-deploy/network-sync-finalization.test.cjs
+```
+
+the client previously treated owner zero as nonexistent in syncNetwork. it now
+requires a matching, nonzero network ID instead. five extracted-function checks
+pass: baseline omission reproduced, finalized and ordinary networks sync,
+nonexistent/mismatched IDs reject, and RPC failure writes nothing. RPC/database
+boundaries are mocked; no full client typecheck, real database or event-driven
+refresh is established. new finalization-event handling elsewhere still needs
+review. the contract candidate itself is unchanged by this follow-up.

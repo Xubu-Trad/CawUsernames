@@ -205,7 +205,8 @@ async function syncNetwork(networkId: number): Promise<boolean> {
     // V2: CawNetworkManager exposes getNetwork(); the struct includes 4 ceiling fields.
     const network = await networkManager.getNetwork(networkId)
 
-    if (network.ownerAddress === '0x0000000000000000000000000000000000000000') {
+    // Finalized networks have no owner; existence is determined by the stored ID.
+    if (network.id === 0n || Number(network.id) !== networkId) {
       return false
     }
 
