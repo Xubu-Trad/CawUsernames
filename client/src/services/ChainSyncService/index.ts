@@ -945,6 +945,7 @@ async function handleSessionCreated(args: any) {
     }
   } catch (err: any) {
     console.error(`[ChainSync:L2Events] Failed to upsert SessionKey for ${owner}/${sessionAddress}:`, err.message)
+    throw err
   }
 }
 
@@ -958,6 +959,7 @@ async function handleSessionRevoked(args: any) {
     })
   } catch (err: any) {
     console.error(`[ChainSync:L2Events] Failed to revoke SessionKey for ${owner}/${sessionAddress}:`, err.message)
+    throw err
   }
 }
 
@@ -973,6 +975,7 @@ async function handleAuthenticated(args: any) {
     })
   } catch (err: any) {
     console.error(`[ChainSync:L2Events] Failed to upsert NetworkAuth for ${networkId}/${tokenId}:`, err.message)
+    throw err
   }
 }
 
