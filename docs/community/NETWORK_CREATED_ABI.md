@@ -70,3 +70,24 @@ the helper is test preparation only, not a proposed merge or release artifact.
 no full service, live database/RPC, reorg recovery, historical backfill or client
 typecheck is claimed. unknown fee types and missing decoded arguments retain
 their existing behavior. #342 remains a separate draft policy decision.
+
+## cursor-read integration with #290
+
+five focused checks pass with #290's L1 cursor reader at
+`a08f47b24fdfdc109f9cc5d27d88c6665b27a20f` substituted into this PR's actual
+poll. the baseline reproduces a failed read bootstrapping beyond the saved
+cursor. the combined reader throws before any log query or checkpoint write,
+and retries from the saved cursor after recovery. a genuine absent row retains
+the existing bootstrap behavior. checkpoint write failure also retains the old
+cursor and retries the same empty range.
+
+```sh
+CAW_CURSOR_SOURCE=path/to/pr290-index.ts node --test solidity/test-deploy/network-cursor-retry.test.cjs
+```
+
+without CAW_CURSOR_SOURCE, the three standalone checks run and the two combined
+checks are explicitly skipped. the test substitutes only the L1 reader; it does
+not test #290's L2 reader or prove a conflict-free full merge. RPC and database
+operations are simulated. the empty-range checkpoint check does not model
+partial event writes or concurrent polling. the 50,000-block fresh-database
+lookback remains unchanged and is not complete cold-start reconstruction.
