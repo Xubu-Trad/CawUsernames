@@ -1,17 +1,21 @@
-# L2 event write retry - draft, replay accounting unresolved
+# L2 event write retry - draft atomic candidate
 
 baseline: `97cd13f3a1423f702d411472fdd2b2a2e7bfbd59`.
 
-session creation, revocation and network authentication handlers catch primary
-database write errors and return normally. the poll then saves the range end.
-a failed revocation can leave an active local row even though its chain event
-was scanned. this is not evidence of a bypass of on-chain session validation.
+session creation, revocation and authentication handlers previously logged
+primary database failures and returned, allowing the checkpoint to advance.
+propagating these errors alone retained the checkpoint but exposed successful
+earlier writes. replaying creation could then reset an intervening spending-cache
+update. the earlier reproduction is preserved at
+`1d1617b72f1eca62ec530e0a6739c6ed59c68012`.
 
-the patch propagates those three errors into the existing range retry catch.
-no contract, signature, fee or authorization policy changes. successful earlier
-writes are replayed, not rolled back. the existing ordering remains intact.
+the current candidate applies each fetched range and its checkpoint in one
+Prisma transaction. handlers receive the transaction client, including their
+nested database work. RPC log acquisition remains outside the transaction.
+primary write failures propagate and roll back the range. no contract, signature
+or economic policy changes. genuine new session creation still resets spending.
 
-## reproduce
+## focused reproduction
 
 with node 24 and ethers 6.16 installed, run from the repository root:
 
@@ -19,48 +23,38 @@ with node 24 and ethers 6.16 installed, run from the repository root:
 node --test solidity/test-deploy/l2-event-retry.test.cjs
 ```
 
-six checks pass: create/revoke order, revoke/recreate order, each of three write
-failures followed by successful retry, and a baseline control reproducing a
-skipped revocation. the tests extract the actual poll and handlers, use real
-ethers ABI encoding/decoding, and simulate RPC and database behavior. a failed
-write holds block 10; recovery replays block 11 and saves it only after success.
-the baseline advances to 11 while the local session remains active.
+seven checks pass: both create/revoke orderings, creation/revocation/authentication
+write failures, checkpoint write failure, and failed-range visibility. tests use
+the actual extracted poll/handlers, real ethers ABI encoding/decoding, and a
+simulated transactional database. accessing the global client during the modeled
+transaction throws, checking that handler calls use the supplied client.
 
-## boundaries
+historical control: save ChainSyncService/index.ts from
+`1d1617b72f1eca62ec530e0a6739c6ed59c68012`, then run:
 
-this does not fix cursor read failures (#290), the L1 fee event path (#345),
-fresh-node lookback limits, missing session rows, reorganizations, concurrent
-polling or complete cold-start recovery. nested best-effort TxQueue cleanup and
-signature recovery catches are unchanged. no full client typecheck, real
-database/RPC or full-service run is claimed. no release readiness is asserted.
+```sh
+CAW_L2_SOURCE=path/to/previous-index.ts node --test solidity/test-deploy/l2-event-retry.test.cjs
+```
 
-#182 handles frontend revocation confirmation and #324 handles batch signer
-recovery in DataCleaner; neither replaces these primary event-write retries.
+the control explicitly expects partially visible state in the older source;
+its passing assertions describe a defect, not safety. this is seven checks in
+two modes, not fourteen independent safety checks.
 
-independent nodes need reliable replay to avoid manual operator repair. this
-supports the manifesto/R2 independence requirement but is not itself proof of
-complete protocol decentralization or removal of contract authority.
+## draft gates
 
-## blocking replay-accounting reproduction
+real PostgreSQL/Prisma rollback, concurrent spending updates, concurrent pollers,
+and transaction timeout behavior still require validation. the transaction uses
+Prisma defaults; dense ranges and nested queue work may exceed those limits.
+this candidate does not prove acceptable sustained indexing throughput.
 
-review found a second effect: the SessionCreated update resets `spent` to zero.
-if that write succeeds, a later authentication write fails, and another service
-updates the local spending cache before retry, replaying creation resets it.
-the additional test simulates this interleaving: checkpoint remains 10, cache
-is set to 25 between attempts, retry reaches 11 with cache 0. its passing
-assertion records the defect; it is not a safety pass.
+nested TxQueue/signature recovery catches retain their prior best-effort behavior.
+missing session rows, fresh-node lookback, reorganizations, corrupted cursors and
+complete cold-start recovery are not solved. #290 addresses failed cursor reads,
+#345 the L1 event-write path, #182 frontend revocation confirmation, and #324
+DataCleaner batch signer recovery. no full client typecheck or full-service run
+is claimed. do not merge or deploy this draft until the database/concurrency
+and liveness gates are satisfied.
 
-the six earlier checks still pass after correcting the mock upsert to distinguish
-Prisma create/update behavior. the seventh reproduces this unresolved limitation.
-this is simulated interleaving, not a measured live concurrent database run.
-the on-chain spend limit remains a separate enforcement boundary; no contract
-bypass has been demonstrated.
-
-this PR must remain draft until replay is idempotent with respect to session
-incarnation and accounting. simply removing the reset is insufficient because
-a genuinely new incarnation must reset its accounting. candidate approaches
-include durable event provenance with atomic application, or a reviewed recovery
-model that obtains authoritative state without overwriting newer local state.
-no approach is implemented or accepted here. full transaction/replay interaction
-with TxQueue side effects also requires review. do not merge the three-throw
-patch as a complete recovery fix in its current form.
+reliable replay supports independent operators and the manifesto/R2 goal of
+not depending on an indispensable developer. it is not proof of complete
+protocol decentralization. no on-chain spending-limit bypass is demonstrated.
