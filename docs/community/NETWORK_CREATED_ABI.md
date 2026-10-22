@@ -33,3 +33,40 @@ this supports independently reconstructing network registrations from chain
 history. it does not resolve the existing finite lookback, cursor scoping, reorgs
 or swallowed database failures in other handlers. the new draft NetworkFinalized
 event in #342 is a separate change; this correction is valid on current master.
+
+## failed-write retry
+
+the creation, fee and ceiling handlers previously logged database write failures
+and returned normally. the poll could then advance its checkpoint past the
+rejected event. these handlers now propagate write failures to the existing
+range retry path. the existing P2025 missing-row/full-sync fallback remains
+unchanged; this is not a complete missing-history fix.
+
+with node 24 and ethers 6.16 installed, run from the repository root:
+
+```sh
+node --test solidity/test-deploy/network-created-abi.test.cjs solidity/test-deploy/network-event-retry.test.cjs
+```
+
+the ABI suite passes 4 checks; the retry suite passes 5. the latter executes the
+actual extracted poll and handlers with real ethers event encoding/decoding,
+but simulated RPC and database responses. creation, fee and ceiling failures
+hold the range checkpoint; the next invocation replays successfully. a baseline
+control removes exactly the three new throws and reproduces the skipped write.
+partial database writes are not transactional; replay reapplies the range.
+
+an additional local combined run with draft #342 at
+`39435a853dd4673ac39ce5b34f97f7f0ef1e6299` passes 7 checks, including creation,
+fee changes, finalization, failed refresh and retry. these include the same five
+retry checks, not seven additional independent checks. to reproduce, assemble
+the two sources with the helper and set CAW_REPLAY_SOURCE to its output:
+
+```sh
+python solidity/test-deploy/combine-network-replay.py path/to/342-index.ts client/src/services/ChainSyncService/index.ts combined-index.ts
+CAW_REPLAY_SOURCE=./combined-index.ts node --test solidity/test-deploy/network-event-retry.test.cjs
+```
+
+the helper is test preparation only, not a proposed merge or release artifact.
+no full service, live database/RPC, reorg recovery, historical backfill or client
+typecheck is claimed. unknown fee types and missing decoded arguments retain
+their existing behavior. #342 remains a separate draft policy decision.
