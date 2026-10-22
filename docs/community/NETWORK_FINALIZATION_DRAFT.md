@@ -113,3 +113,29 @@ nonexistent/mismatched IDs reject, and RPC failure writes nothing. RPC/database
 boundaries are mocked; no full client typecheck, real database or event-driven
 refresh is established. new finalization-event handling elsewhere still needs
 review. the contract candidate itself is unchanged by this follow-up.
+
+## finalization event refresh
+
+ChainSyncService now queries NetworkFinalized alongside its existing L1 events.
+the event triggers syncNetwork to refresh authoritative current network state,
+including the zero owner. a rejected RPC query, missing/invalid network ID or
+failed network read/write leaves the range checkpoint unchanged for retry. older
+contracts with no such events continue through the empty-query path. the new
+filter is a minimal local ABI addition; no generated artifact change is needed.
+
+six focused tests use actual ethers6 event-topic construction and ABI decoding,
+with mocked RPC/storage and extracted event-loop source. positive refresh,
+refresh failure, query failure, missing args, invalid ID and no-event cases pass.
+run with Node24 and ethers6.16.0 installed, or set CAW_ETHERS_PACKAGE to its verified
+CommonJS/UMD path:
+
+```sh
+node --max-old-space-size=256 --test test-deploy/network-finalization-event.test.cjs
+```
+
+this uses the existing five-minute event poll when configured, not an instant
+notification or historical state snapshot. the 30-minute full network sync remains
+as reconciliation. full client startup, actual RPC/database integration, event
+backfill beyond the existing lookback, chain-bound cursors and reorg recovery are
+still outside this result. other preexisting fee handlers have different failure
+semantics; this patch does not silently claim to repair all indexing behavior.
