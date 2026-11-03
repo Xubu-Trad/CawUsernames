@@ -1,0 +1,86 @@
+[
+  {
+    "path": "README.md",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "2c1fd55e3cfea5852694446e4b2dd93297d7ca751896854bb8f845693c98e8c1",
+    "bytes": 16631
+  },
+  {
+    "path": "client/.env.example",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "8443ac1c61eb0790ada0274ccaee273031d1f78c1204a1929dfd4172e29bcced",
+    "bytes": 11104
+  },
+  {
+    "path": "client/prisma/schema.prisma",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "22608b74f385d96b1becf3542851f507c84a6724dcee602ee75643a4aa1afc0d",
+    "bytes": 46738
+  },
+  {
+    "path": "client/src/services/DmRelayService/index.ts",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "c7ae3eb78c6056a12b8d8b4e4ccad1d2afdc304d6dedc4f83e00586027b48d66",
+    "bytes": 14579
+  },
+  {
+    "path": "client/src/services/FrontEnd/src/api/client.ts",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "06c1c9373ad59b1144965b859922d40c73df54d66b324e4b989342ab15124b62",
+    "bytes": 16173
+  },
+  {
+    "path": "client/src/services/FrontEnd/src/services/DmCryptoService.ts",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "3330f5f67ab29a395a00926160ee1da25d411a3c8648974d13c0991fdc141bbe",
+    "bytes": 22583
+  },
+  {
+    "path": "client/src/services/FrontEnd/src/store/instanceStore.ts",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "561733d819b5c3363e8db07ad6bacfde8aa51c7c0e1f64da67117e4c1cacf92e",
+    "bytes": 16031
+  },
+  {
+    "path": "client/src/utils/rpcProvider.ts",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "14b56e9dfb73b6b5e2a31ca0ab8548542576eaf3d8fb774d4de853127bebcec7",
+    "bytes": 33454
+  },
+  {
+    "path": "install.sh",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "1319c2aa5a0da9f9a58fe86c500ca49c835ead6ae0db87b255a33220c8a281a4",
+    "bytes": 48346
+  },
+  {
+    "path": "solidity/contracts/CawNetworkManager.sol",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "e70862ce87cc331f859539d62f67e6dfd079b35d68713d810ed2cfeca96db881",
+    "bytes": 36558
+  },
+  {
+    "path": "solidity/contracts/CawProfileMinter.sol",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "31da6efc43d4be9233b1d5f1207642d4965489208f375871a1635a18b2283980",
+    "bytes": 46753
+  },
+  {
+    "path": "solidity/contracts/CivicKycVerifier.sol",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "9c55cb469073cc1c1a6577645c9fe9b7e96eae7bb689b43573ce0b85f2093bed",
+    "bytes": 1013
+  },
+  {
+    "path": "solidity/contracts/PathwayExpander.sol",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "08ae7dec09bb0077706fc5d65704e4f6b5d2990e220080c64550d14ad72d870a",
+    "bytes": 16366
+  },
+  {
+    "path": "solidity/zk/sig-recovery/VKEY_REPRODUCIBILITY.md",
+    "commit": "97cd13f3a1423f702d411472fdd2b2a2e7bfbd59",
+    "sha256": "7dd2a2e87a75692f63f44dbd02fe05ac52f9c4dc63d4e9f7a94e172db4d575cc",
+    "bytes": 7524
+  }
+]
