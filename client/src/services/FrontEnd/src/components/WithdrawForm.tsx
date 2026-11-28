@@ -20,7 +20,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { HiInformationCircle } from 'react-icons/hi'
 import { formatEther, formatUnits, encodeFunctionData, erc20Abi, parseUnits, isAddress } from 'viem'
 import type { Address } from 'viem'
-import { useReadContract } from 'wagmi'
+import { useReadContracts } from 'wagmi'
 import { cawProfileAbi, cawProfileQuoterAbi } from '~/../../../abi/generated'
 import { CAW_ADDRESS, CAW_NAMES_ADDRESS, CAW_NAME_QUOTER_ADDRESS } from '~/../../../abi/addresses'
 import { CLIENT_ID } from '~/api/actions'
@@ -75,12 +75,11 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
   const ethPrice = usePriceStore(s => s.priceMap['ethereum'] ?? 0)
   const cawPrice = usePriceStore(s => s.priceMap['a-hunters-dream'] ?? 0)
 
-  const [withdrawFee, setWithdrawFee] = useState<bigint>(0n)
   const [showFeeModal, setShowFeeModal] = useState(false)
   const [recipientInput, setRecipientInput] = useState<string>('')
   const [isPending, setIsPending] = useState(false)
   const [confirmVisible, setConfirmVisible] = useState(false)
-  const [sponsorQuote, setSponsorQuote] = useState<SponsorExecuteQuote | null>(null)
+  const [savedSponsorQuote, setSponsorQuote] = useState<(SponsorExecuteQuote & { forwardedValue: bigint }) | null>(null)
   const [quoteLoading, setQuoteLoading] = useState(false)
 
   const isPopB = population === 'B'
@@ -103,32 +102,32 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
   const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address
   const recipientForEncode: Address = recipientValid ? (recipient as Address) : ZERO_ADDRESS
 
-  // LZ fee quote (same quoter as Staking.tsx)
-  const { data: withdrawQuote } = useReadContract({
-    address: CAW_NAME_QUOTER_ADDRESS,
-    abi: cawProfileQuoterAbi,
-    chainId: chains.l1.chainId,
-    // lzDestId (the L2 the stake lives on) is required — the quoter routes
-    // through the matching L2 peer to read withdrawFee + storage fee; passing 0
-    // reverts on the missing-peer guard. Mirrors Staking.tsx's withdrawQuote.
-    functionName: 'withdrawQuote',
-    args: [CLIENT_ID, chains.l2.layerZero, false],
+  // Read both legs together. withdrawTo honors a lower locked fee for this NFT.
+  const quoter = { address: CAW_NAME_QUOTER_ADDRESS, abi: cawProfileQuoterAbi, chainId: chains.l1.chainId } as const
+  const { data: feeParts, isError: quoteFailed } = useReadContracts({
+    allowFailure: false,
+    contracts: [
+      { ...quoter, functionName: 'updateOwnerQuote', args: [chains.l2.layerZero, false] },
+      { ...quoter, functionName: 'effectiveWithdrawFee', args: [CLIENT_ID, Number(tokenId ?? 0)] },
+    ],
     query: { enabled: !!tokenId && withdrawable > 0n },
   })
+  const feeReady = feeParts != null && !quoteFailed
+  const messagingFee = feeParts?.[0].nativeFee ?? 0n
+  const operatorFee = feeParts?.[1] ?? 0n
+  const withdrawFee = messagingFee + operatorFee * 2n
 
-  useEffect(() => {
-    if (withdrawQuote?.nativeFee != null) setWithdrawFee(BigInt(withdrawQuote.nativeFee))
-  }, [withdrawQuote])
+  const sponsorQuote = feeReady && savedSponsorQuote?.forwardedValue === withdrawFee ? savedSponsorQuote : null
 
   // Fetch sponsor quote when Pop-B and confirmation panel is visible. The relayer
-  // forwards the LZ fee (withdrawFee) as msg.value and is repaid gas + that value in
+  // forwards the withdrawal value (withdrawFee) as msg.value and is repaid gas + that value in
   // CAW (SmartEOA v2 payable), so the quote MUST include it via forwardedValueWei —
   // otherwise the signed CAW fee leg underpays the floor /execute enforces and the
   // batch is rejected FEE_TOO_LOW. Wait for withdrawFee before quoting; refetch when
   // it resolves (it loads async from withdrawQuote).
   useEffect(() => {
     if (!isPopB || !confirmVisible) return
-    if (withdrawFee === 0n) return // wait for the LZ fee before pricing the CAW leg
+    if (!feeReady) return // wait for the withdrawal quote before pricing the CAW leg
     let cancelled = false
     const fetchQuote = async () => {
       setQuoteLoading(true)
@@ -136,7 +135,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
         const data = await apiFetch<SponsorExecuteQuote>(
           `/api/sponsor/execute-quote?forwardedValueWei=${withdrawFee.toString()}`,
         )
-        if (!cancelled) setSponsorQuote(data)
+        if (!cancelled) setSponsorQuote({ ...data, forwardedValue: withdrawFee })
       } catch {
         if (!cancelled) setSponsorQuote(null)
       } finally {
@@ -145,7 +144,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
     }
     fetchQuote()
     return () => { cancelled = true }
-  }, [isPopB, confirmVisible, withdrawFee])
+  }, [isPopB, confirmVisible, withdrawFee, feeReady])
 
   // Pop-A direct withdrawTo via useContractCall
   const withdrawPopA = useContractCall({
@@ -156,7 +155,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
     // (the L2 the stake lives on) so L1 can opportunistically flush a queued
     // owner update; lzTokenAmount=0n pays LZ fees in native ETH.
     args: [CLIENT_ID, Number(tokenId ?? 0), recipientForEncode, chains.l2.layerZero, 0n],
-    disabled: !tokenId || withdrawFee === 0n || !recipientValid || withdrawable === 0n,
+    disabled: !tokenId || !feeReady || !recipientValid || withdrawable === 0n,
     value: withdrawFee,
     onPending: () => setIsPending(true),
     onSuccess: (hash) => {
@@ -174,7 +173,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
 
   // Pop-B relayed batch execute
   const handlePopBWithdraw = useCallback(async () => {
-    if (!eoaAccount || !tokenId || !sponsorQuote || !sponsorQuote.priceAvailable) return
+    if (!feeReady || !eoaAccount || !tokenId || !sponsorQuote || !sponsorQuote.priceAvailable) return
     if (!recipientValid) return
 
     setIsPending(true)
@@ -226,7 +225,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
     } finally {
       setIsPending(false)
     }
-  }, [eoaAccount, tokenId, sponsorQuote, recipientValid, withdrawable, withdrawFee, recipient, smartEoaExecute, onSuccess, onSuccessRefetch])
+  }, [feeReady, eoaAccount, tokenId, sponsorQuote, recipientValid, withdrawable, withdrawFee, recipient, smartEoaExecute, onSuccess, onSuccessRefetch])
 
   const handleConfirm = useCallback(async () => {
     if (isPopA) {
@@ -239,7 +238,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
   }, [isPopA, isPopB, ensureWallet, withdrawPopA, handlePopBWithdraw])
 
   // Derived display values
-  const lzFeeEth = Number(formatEther(withdrawFee))
+  const totalFeeEth = Number(formatEther(withdrawFee))
   const feeCawDisplay = sponsorQuote ? Number(formatUnits(BigInt(sponsorQuote.minFeeCawWei), 18)) : null
   const netCawDisplay = sponsorQuote
     ? Math.max(0, withdrawableCaw - (feeCawDisplay ?? 0))
@@ -249,7 +248,7 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
   // relayer forwards the LZ native fee as msg.value and is repaid in CAW. A Pop-B EOA
   // needs ZERO ETH to withdraw — the only constraint is the CAW-fee cliff below.)
 
-  // Pop-B CAW-fee cliff: the relayer fronts the gas AND forwards the LZ fee, repaid in
+  // Pop-B CAW-fee cliff: the relayer fronts the gas AND forwards the withdrawal value, repaid in
   // CAW (feeCaw, which now includes that forwarded value). If the withdrawable CAW
   // can't cover that fee, the batch's repay leg would fail — warn + block. Only
   // meaningful once the quote resolves.
@@ -311,10 +310,10 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
         </div>
 
         {/* LZ network fee + info icon → fee breakdown modal */}
-        {withdrawFee > 0n && (
+        {feeReady && (
           <div className="flex justify-between items-center text-sm mt-2">
             <span className={`${mutedClass} flex items-center gap-1`}>
-              {t('withdraw.lz_fee_label')}
+              {t('withdraw.quote_total')}
               <button
                 type="button"
                 aria-label={t('withdraw.fee_details_aria')}
@@ -325,11 +324,21 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
               </button>
             </span>
             <span className={mutedClass}>
-              {lzFeeEth.toFixed(5)} ETH
-              {ethPrice > 0 && ` (~$${(lzFeeEth * ethPrice).toFixed(2)})`}
+              {formatEther(withdrawFee)} ETH
+              {ethPrice > 0 && ` (~$${(totalFeeEth * ethPrice).toFixed(2)})`}
             </span>
           </div>
         )}
+
+        {feeReady && (
+          <div className={`mt-2 space-y-1 text-xs ${mutedClass}`}>
+            <div>{t('withdraw.quote_messaging')} · {formatEther(messagingFee)} ETH</div>
+            <div>{t('withdraw.quote_operator')} · {formatEther(operatorFee)} ETH</div>
+            <div>{t('withdraw.quote_burn')} · {formatEther(operatorFee)} ETH</div>
+            <p>{t(isPopB ? 'withdraw.quote_relay' : 'withdraw.quote_direct')}</p>
+          </div>
+        )}
+        {quoteFailed && <p role="alert">{t('withdraw.pricing_unavailable')}</p>}
 
         {/* Pop-B relayer CAW fee + net display */}
         {isPopB && feeCawDisplay != null && (
@@ -373,9 +382,9 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
       {!confirmVisible ? (
         <button
           onClick={() => setConfirmVisible(true)}
-          disabled={!recipientValid || withdrawFee === 0n}
+          disabled={!recipientValid || !feeReady}
           className={`w-full py-3 px-4 rounded-full font-semibold transition-all duration-300 ${
-            !recipientValid || withdrawFee === 0n
+            !recipientValid || !feeReady
               ? isDark ? 'bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
               : 'bg-yellow-500 hover:bg-yellow-600 text-black cursor-pointer'
           }`}
@@ -422,13 +431,13 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
             <button
               onClick={handleConfirm}
               disabled={
-                isPending ||
+                isPending || !feeReady ||
                 !recipientValid ||
                 popBNeedsCaw ||
                 (isPopB && (!sponsorQuote || !sponsorQuote.priceAvailable || quoteLoading))
               }
               className={`flex-1 py-2 px-4 rounded-full text-sm font-semibold transition-all duration-300 ${
-                isPending ||
+                isPending || !feeReady ||
                 !recipientValid ||
                 popBNeedsCaw ||
                 (isPopB && (!sponsorQuote || !sponsorQuote.priceAvailable || quoteLoading))
@@ -467,12 +476,12 @@ export function WithdrawForm({ tokenId, withdrawableWei, onSuccess, onSuccessRef
             {/* LayerZero network fee (ETH) */}
             <div className="flex justify-between items-start text-sm py-2">
               <div className="pr-3">
-                <div className={strongClass}>{t('withdraw.fee_modal_lz_label')}</div>
-                <div className={`text-xs ${mutedClass}`}>{t('withdraw.fee_modal_lz_desc')}</div>
+                <div className={strongClass}>{t('withdraw.quote_total')}</div>
+                <div className={`text-xs ${mutedClass}`}>{t(isPopB ? 'withdraw.quote_relay' : 'withdraw.quote_direct')}</div>
               </div>
               <div className={`text-right ${mutedClass} whitespace-nowrap`}>
-                {lzFeeEth.toFixed(5)} ETH
-                {ethPrice > 0 && <div className="text-xs">~${(lzFeeEth * ethPrice).toFixed(2)}</div>}
+                {formatEther(withdrawFee)} ETH
+                {ethPrice > 0 && <div className="text-xs">~${(totalFeeEth * ethPrice).toFixed(2)}</div>}
               </div>
             </div>
 
